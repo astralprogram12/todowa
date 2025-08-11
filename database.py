@@ -4,7 +4,7 @@ from supabase import Client
 from datetime import date, datetime
 from config import UNVERIFIED_LIMIT, VERIFIED_LIMIT
 
-# --- User and Usage Functions (No Changes) ---
+# --- User and Usage Functions ---
 def get_user_id_by_phone(supabase: Client, phone: str) -> str | None:
     try:
         res = supabase.table('user_whatsapp').select('user_id').eq('phone', phone).eq('status', 'connected').is_('wa_connected', True).execute()
@@ -35,13 +35,18 @@ def check_and_update_usage(supabase: Client, sender_phone: str, user_id: str | N
         print(f"!!! DATABASE ERROR in check_and_update_usage: {e}")
         return (False, "Sorry, I'm having trouble with my database right now.")
 
-# --- Context and Query Functions (Updated) ---
+# --- Context and Query Functions ---
+
+def get_user_context_for_ai(supabase: Client, user_id: str) -> dict: # <-- NEW
+    """Fetches user-specific context, like their timezone."""
+    try:
+        res = supabase.table('user_whatsapp').select('timezone').eq('user_id', user_id).execute()
+        return res.data[0] if res.data else {}
+    except Exception as e:
+        print(f"!!! DATABASE ERROR in get_user_context_for_ai: {e}")
+        return {}
 
 def get_list_context_for_ai(supabase: Client, user_id: str) -> dict:
-    """
-    NEW: Fetches all available task lists for a user to provide as context.
-    This assumes your 'lists' table has a 'user_id' column linking it to the user.
-    """
     try:
         lists_res = supabase.table('lists').select('id, name, color').eq('user_id', user_id).execute()
         return {"lists": lists_res.data if lists_res.data else []}
@@ -50,17 +55,13 @@ def get_list_context_for_ai(supabase: Client, user_id: str) -> dict:
         return {"lists": []}
 
 def get_task_context_for_ai(supabase: Client, user_id: str) -> dict:
-    """
-    UPDATED: Selects new fields and fetches the associated list name via a join.
-    """
     try:
-        # The syntax 'lists(name)' tells Supabase to fetch the 'name' from the related 'lists' table.
         tasks_res = supabase.table('tasks').select(
-            'id, title, status, due_date, priority, difficulty, category, tags, list:lists(name)'
+            # <-- MODIFIED: Added reminder_at to the context for the AI to see
+            'id, title, status, due_date, priority, difficulty, category, tags, reminder_at, list:lists(name)'
         ).eq('user_id', user_id).order('created_at', desc=True).limit(50).execute()
         
         tasks = tasks_res.data or []
-        # Flatten the list object for cleaner context: from task['list']['name'] to task['list_name']
         for task in tasks:
             if task.get('list') and isinstance(task.get('list'), dict):
                 task['list_name'] = task['list']['name']
@@ -72,7 +73,6 @@ def get_task_context_for_ai(supabase: Client, user_id: str) -> dict:
         return {"tasks": []}
 
 def query_tasks(supabase: Client, user_id: str, **filters):
-    """Searches tasks with various filters."""
     q = supabase.table("tasks").select("*").eq("user_id", user_id)
     if filters.get('title_like'): q = q.ilike('title', f"%{filters['title_like']}%")
     if filters.get('id'): q = q.eq('id', filters['id'])
@@ -81,17 +81,14 @@ def query_tasks(supabase: Client, user_id: str, **filters):
     return res.data or []
 
 def query_lists(supabase: Client, user_id: str, **filters):
-    """
-    NEW: Queries the lists table based on filters.
-    """
     q = supabase.table("lists").select("*").eq("user_id", user_id)
-    if filters.get('name'): q = q.ilike('name', filters['name']) # Exact match is better here
+    if filters.get('name'): q = q.ilike('name', filters['name'])
     if filters.get('id'): q = q.eq('id', filters['id'])
     res = q.execute()
     if getattr(res, "error", None): raise Exception(str(res.error))
     return res.data or []
 
-# --- Database Action Functions (No Changes) ---
+# --- Database Action Functions ---
 def add_task_entry(supabase: Client, user_id: str, **kwargs):
     kwargs['user_id'] = user_id
     res = supabase.table("tasks").insert(kwargs).execute()
