@@ -1,3 +1,0 @@
-flask
-supabase
-google-generativeai
