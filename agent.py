@@ -18,10 +18,10 @@ You MUST always answer in two parts: a brief, conversational response, followed 
 ```json
 {{
   "actions": [
-    {{ "type": "add_task", ... }},
-    {{ "type": "update_task", ... }},
-    {{ "type": "complete_task", ... }},
-    {{ "type": "delete_task", ... }},
+    {{ "type": "add_task", "title": "string", "notes":"string?", "dueDate":"YYYY-MM-DD?", "priority":"low|medium|high?" }},
+    {{ "type": "update_task", "id":"string?", "titleMatch":"string?", "patch": {{ "title?": "string", "notes?":"string", "dueDate?":"YYYY-MM-DD", "status?":"todo|doing|done" }} }},
+    {{ "type": "complete_task", "id":"string?", "titleMatch":"string?", "done": true }},
+    {{ "type": "delete_task", "id":"string?", "titleMatch":"string?" }}
     {{
       "type": "set_reminder",
       "id": "string?",
@@ -145,3 +145,4 @@ You must handle two types of time requests differently.
 def run_agent_one_shot(model: Any, history: List[Dict[str, str]], context: Dict[str, Any]) -> Tuple[str, List[Dict[str, Any]]]:
     agent = SmartTaskAgent()
     return agent.run_agent_one_shot(model, history, context)
+
