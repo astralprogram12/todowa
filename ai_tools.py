@@ -63,14 +63,24 @@ def _process_list_name(supabase, user_id, args):
     return args
 
 # --- Task & Reminder Tools (Corrected Signatures) ---
+# ai_tools.py
 
 def add_task(supabase, user_id, **kwargs):
     """Adds a new task."""
     # FIX: Process list name and convert all keys to snake_case
     processed_kwargs = _process_list_name(supabase, user_id, kwargs)
     snake_case_args = _convert_keys_to_snake_case(processed_kwargs)
+
+    # --- START CORRECTION ---
+    # Standardize the 'difficulty' field to lowercase to match the database constraint.
+    if 'difficulty' in snake_case_args and isinstance(snake_case_args.get('difficulty'), str):
+        snake_case_args['difficulty'] = snake_case_args['difficulty'].lower()
+    # --- END CORRECTION ---
+    
     database.add_task_entry(supabase, user_id, **snake_case_args)
     return {"status": "ok", "message": f"I've added the task: '{kwargs.get('title')}'."}
+
+
 def update_task(supabase, user_id, id=None, titleMatch=None, patch=None):
     """Updates an existing task."""
     if not patch:
@@ -340,6 +350,7 @@ AVAILABLE_TOOLS = {
     # AI Actions (Scheduled Actions)
     "schedule_ai_action": schedule_ai_action, "update_ai_action": update_ai_action, "delete_ai_action": delete_ai_action, "list_ai_actions": list_ai_actions,
 }
+
 
 
 
