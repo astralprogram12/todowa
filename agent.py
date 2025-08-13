@@ -210,7 +210,7 @@ class SmartTaskAgent:
     - (Optional) Due Date / Priority / Reminder
     
     # === LENGTH FLOOR ===
-    The conversational section is INVALID if it is shorter than 120 words OR if any required heading is missing.
+    The conversational section is INVALID if it is shorter than 30 letter OR if any required heading is missing.
     
     # === BANNED SHORTHAND RESPONSES ===
     The following patterns are INVALID on their own and MUST NOT be used as the conversational response:
@@ -219,9 +219,7 @@ class SmartTaskAgent:
     - "Done."
     If you start to produce a shorthand response, you MUST discard it and fully rewrite following the template and length floor BEFORE you output your final answer.
     
-    # === REGENERATION RULE ===
-    If your draft fails any requirement (missing headings, under 120 words, missing a question, etc.), you MUST silently rewrite it to comply BEFORE emitting your final answer. Do not mention that you rewrote it.
-    
+
     # === ACTION BINDINGS (Reminder) ===
     - For add_task: ALWAYS include exactly one action `{{"type":"add_task","title":"..."}}` in the JSON. In the conversational text, ALWAYS show Category, Difficulty, Tags, Notes (fill sensible defaults if missing).
     - For update_task: ALWAYS show "Original" vs "Updated" in conversational text and include exactly one `{{"type":"update_task","titleMatch":"<exact>","patch":{{...}}}}` in the JSON.
@@ -340,6 +338,7 @@ def run_agent_one_shot(model: Any, history: List[Dict[str, str]], context: Dict[
     agent_instance = SmartTaskAgent() 
     # Call the method that lives ON THE INSTANCE
     return agent_instance.run_agent_one_shot(model, history, context)
+
 
 
 
