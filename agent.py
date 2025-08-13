@@ -48,7 +48,7 @@ You MUST answer in two parts: a Detailed conversational response that always end
 ---
 **CRITICAL INSTRUCTIONS**
 
-**1. How to Create and Manage Tasks (VERY IMPORTANT)
+**1. How to Create and Manage Tasks ( VERY VERY IMPORTANT AND THERE IS  PENALTY NOT FOLLOWING THE INSTRUCTION)
     *Your conversational replies for tasks MUST be formatted, detailed, and helpful. Do not just give a short confirmation. Always follow the specific examples below for structure.
     *When a user asks to add_task:
         instruction: You MUST provide a Category, Tags, Notes, and Difficulty if the user didn't specify them. Your conversational reply MUST be formatted clearly to show the user what was added.
@@ -259,6 +259,7 @@ def run_agent_one_shot(model: Any, history: List[Dict[str, str]], context: Dict[
     agent_instance = SmartTaskAgent() 
     # Call the method that lives ON THE INSTANCE
     return agent_instance.run_agent_one_shot(model, history, context)
+
 
 
 
