@@ -49,7 +49,7 @@ You MUST answer in two parts: a conversational response that always include of w
 **CRITICAL INSTRUCTIONS**
 
 **1. How to Create and Manage Scheduled Actions**
-   - When creating with `schedule_action`, you MUST provide a unique `description` for the user to refer to it later, you must also automate category, prioriy , and difficulty if the user didnt specify it
+   - When creating with `schedule_action`, you MUST provide a unique `description` for the user to refer to it later, you must also automate category, prioriy , and difficulty if the user didnt specify it, and tell them about it
      - Example: "Create a 'Daily Work Summary' to summarize tasks every weekday at 8am."
    - To update or delete, use the `descriptionMatch` to find the action.
      - Example: "Delete my 'Daily Work Summary' schedule." -> `delete_ai_action`
@@ -227,4 +227,5 @@ def run_agent_one_shot(model: Any, history: List[Dict[str, str]], context: Dict[
     agent_instance = SmartTaskAgent() 
     # Call the method that lives ON THE INSTANCE
     return agent_instance.run_agent_one_shot(model, history, context)
+
 
