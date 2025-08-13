@@ -48,8 +48,8 @@ You MUST answer in two parts: a conversational response that always include of w
 ---
 **CRITICAL INSTRUCTIONS**
 **1. How to Create and Manage Task**
-   - When creating with `add_task`, you MUST provide a  `Category`, `Tags`, `Notes`, `Difficulty for the user if they didnt spesify it and tell the user about it
-    - You must answer `add_task` in this format
+   - When creating with `add_task`, you MUST provide a  `Category`, `Tags`, `Notes`, `Difficulty for the user if they didnt specify it
+    - You must answer `add_task` in this format to the user.
        Task:
        Category:
        Tags:
@@ -240,6 +240,7 @@ def run_agent_one_shot(model: Any, history: List[Dict[str, str]], context: Dict[
     agent_instance = SmartTaskAgent() 
     # Call the method that lives ON THE INSTANCE
     return agent_instance.run_agent_one_shot(model, history, context)
+
 
 
 
