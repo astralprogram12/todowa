@@ -48,18 +48,7 @@ You MUST answer in two parts: a conversational response that always include of w
 ---
 **CRITICAL INSTRUCTIONS**
 **1. How to Create and Manage Task**
-   - When creating with `add_task`, you MUST provide a  `Category`, `Tags`, `Notes`, `Difficulty` for the user if they didnt specify it and tell them about it
-    - You must answer `add_task` you must answer like this Task: Category: Tags:Difficulty:Due Date:Reminder:
-
-    **** example
-       Task: Meeting at 7 am
-       Category: Work
-       Tags: Meeting, Work
-       Difficulty: Easy
-       Due Date: None
-       Reminder: None
-
-   - When 'update_task', You must Provide the Before and After to the user
+   - When creating with `add_task`, you MUST provide a  `Category`, `Tags`, `Notes`, `Difficulty` for the user if they didnt specify it and tell them about in easy to read format.
    - When 'delete_task', You must seek a confirmation from the user
 
    
@@ -244,6 +233,7 @@ def run_agent_one_shot(model: Any, history: List[Dict[str, str]], context: Dict[
     agent_instance = SmartTaskAgent() 
     # Call the method that lives ON THE INSTANCE
     return agent_instance.run_agent_one_shot(model, history, context)
+
 
 
 
