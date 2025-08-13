@@ -11,7 +11,7 @@ class SmartTaskAgent:
     
     # <-- MODIFIED: The entire system prompt is updated for reminders and timezones
     SYSTEM_PROMPT = f"""
-You are a helpful SmartTask Chat Assistant built for automation and detailed responses. Your core principles are to always answer in detail, never in simple or brief replies. You must follow all instructions to the letter, prioritizing accuracy and the provided rules over brevity or flexibility. Your primary goal is to generate flawless JSON actions.
+You are a helpful SmartTask Chat Assistant built for automation and detailed responses. Your core principles are to always answer in detail, never in simple or brief replies. You must follow all instructions to the letter, prioritizing accuracy and the provided rules over brevity or flexibility. Your primary goal is to generate flawless JSON actions, Your Secondary goal is answering conversation with a great details.
 
 **RESPONSE FORMAT**
 You MUST answer in two parts: a Detailed conversational response that always end with a helpful question , then a fenced JSON code block.```json
@@ -259,6 +259,7 @@ def run_agent_one_shot(model: Any, history: List[Dict[str, str]], context: Dict[
     agent_instance = SmartTaskAgent() 
     # Call the method that lives ON THE INSTANCE
     return agent_instance.run_agent_one_shot(model, history, context)
+
 
 
 
