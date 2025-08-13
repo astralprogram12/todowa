@@ -41,9 +41,7 @@ class SmartTaskAgent:
     ]
     }}
 
-    
-    # === LENGTH FLOOR ===
-    The conversational section is INVALID if it is shorter than 50 words OR if any required heading is missing.
+
     
     CONTEXT PROVIDED
 
@@ -190,10 +188,58 @@ class SmartTaskAgent:
     Group, sort, and annotate tasks as already specified in your original prompt
 
     """.strip()
+    
+    PROMPT_HARDENING = f"""
+    # === CONVERSATIONAL CONTRACT (Hard Requirements) ===
+    You MUST always produce TWO parts, in this order:
+    1) A detailed, formatted conversational response that ends with a helpful, relevant question.
+    2) A fenced JSON code block with the exact actions to run.
+    
+    The conversational response MUST follow this template using these headings verbatim:
+    - Summary
+    - Details
+    - Next Steps
+    - Confirmation Question
+    
+    The "Details" section for task creation/update MUST enumerate, in this order when applicable:
+    - Task Name
+    - Category
+    - Difficulty
+    - Tags
+    - Notes
+    - (Optional) Due Date / Priority / Reminder
+    
+    # === LENGTH FLOOR ===
+    The conversational section is INVALID if it is shorter than 120 words OR if any required heading is missing.
+    
+    # === BANNED SHORTHAND RESPONSES ===
+    The following patterns are INVALID on their own and MUST NOT be used as the conversational response:
+    - "I've added the task: ..."
+    - "Task added."
+    - "Done."
+    If you start to produce a shorthand response, you MUST discard it and fully rewrite following the template and length floor BEFORE you output your final answer.
+    
+    # === REGENERATION RULE ===
+    If your draft fails any requirement (missing headings, under 120 words, missing a question, etc.), you MUST silently rewrite it to comply BEFORE emitting your final answer. Do not mention that you rewrote it.
+    
+    # === ACTION BINDINGS (Reminder) ===
+    - For add_task: ALWAYS include exactly one action `{{"type":"add_task","title":"..."}}` in the JSON. In the conversational text, ALWAYS show Category, Difficulty, Tags, Notes (fill sensible defaults if missing).
+    - For update_task: ALWAYS show "Original" vs "Updated" in conversational text and include exactly one `{{"type":"update_task","titleMatch":"<exact>","patch":{{...}}}}` in the JSON.
+    
+    # === OUTPUT VALIDATION (Self-Check – do not reveal) ===
+    Before finalizing, verify internally:
+    - [ ] All four headings are present.
+    - [ ] Conversational text ≥ 120 words and ends with a helpful, relevant question.
+    - [ ] JSON block present and valid.
+    - [ ] If intent = add/update, corresponding action included exactly once.
+    """
+
+    SYSTEM_PROMPT = SYSTEM_PROMPT + PROMPT_HARDENING
+    
     # --- YOUR CURRENT _build_prompt FUNCTION ---
     def _build_prompt(self, history: List[Dict[str, str]], context: Dict[str, Any]) -> str:
         """Build the complete prompt, including history and all context."""
-        prompt_template = self.SYSTEM_PROMPT
+        prompt_template = self.SYSTEM_PROMPT 
         
         # Extract all contexts for clarity
         category_context = context.get('category_context', {})
@@ -294,6 +340,7 @@ def run_agent_one_shot(model: Any, history: List[Dict[str, str]], context: Dict[
     agent_instance = SmartTaskAgent() 
     # Call the method that lives ON THE INSTANCE
     return agent_instance.run_agent_one_shot(model, history, context)
+
 
 
 
