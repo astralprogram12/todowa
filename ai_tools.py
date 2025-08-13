@@ -1,236 +1,356 @@
-import json
-import logging
-from datetime import date, datetime, timezone # <-- MODIFIED
-from typing import Dict, List, Tuple, Any, Optional
-import utils
+# ai_tools.py (Corrected and Merged Version)
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+import re
+from datetime import datetime
+import pytz
+from croniter import croniter
 
-class SmartTaskAgent:
-    
-    # <-- MODIFIED: The entire system prompt is updated for reminders and timezones
-    SYSTEM_PROMPT = f"""
-You are a helpful SmartTask Chat Assistant with a lot of automation and attention to detail in answering, a precise AI assistant for managing tasks, memories, and schedules. Your goal is to generate flawless JSON actions.
+# Local imports (ensure these files exist and are correct)
+import database
 
-**RESPONSE FORMAT**
-You MUST answer in two parts: a Detailed conversational response that always end with a helpful question , then a fenced JSON code block.```json
-{{
-  "actions": [
-    {{ "type": "add_task", "title": "string" }},
-    {{ "type": "update_task", "titleMatch": "string", "patch": {{ "title?": "string", "notes?": "string" }} }},
-    {{ "type": "complete_task", "titleMatch": "string" }},
-    {{ "type": "delete_task", "titleMatch": "string" }},
-    {{ "type": "set_reminder", "titleMatch": "string", "reminderTime": "YYYY-MM-DDTHH:MM:SSZ" }},
-    {{ "type": "update_reminder", "titleMatch": "string", "newReminderTime": "YYYY-MM-DDTHH:MM:SSZ" }},
-    {{ "type": "delete_reminder", "titleMatch": "string" }},
-    {{ "type": "add_memory", "title": "string", "content": "string?" }},
-    {{ "type": "search_memories", "query": "string" }}, 
-    {{ "type": "update_memory", "titleMatch": "string", "patch": {{ "title?": "string", "content?": "string" }} }},
-    {{ "type": "delete_memory", "titleMatch": "string" }},
-    {{
-      "type": "schedule_ai_action",
-      "action_type": "summarize_tasks" | "create_recurring_task",
-      "description": "string",
-      "schedule": {{ "frequency": "DAILY" | "WEEKLY", "by_day": ["MO"]?, "at_time": "HH:MM" }},
-      "payload": {{ "title?": "string" }}?
-    }},
-    {{ "type": "update_ai_action", "descriptionMatch": "string", "patch": {{ "description?": "string", "schedule?": {{...}} }} }},
-    {{ "type": "delete_ai_action", "descriptionMatch": "string" }}
-  ]
-}}```
+# --- Helper Functions ---
 
-**CONTEXT PROVIDED**
-- `Current UTC Time`: {datetime.now(timezone.utc).isoformat()}
-- `USER_CONTEXT`: Contains the user's preferences like `timezone`.
-- `MEMORY_CONTEXT`, `TASK_CONTEXT`, `category_context`: User's data.
+def _to_snake_case(s):
+    """Converts camelCase string to snake_case."""
+    return re.sub(r'(?<!^)(?=[A-Z])', '_', s).lower()
 
----
-**CRITICAL INSTRUCTIONS**
-**1. How to Create and Manage Task**
-   - When creating with `add_task`, you MUST provide a  `Category`, `Tags`, `Notes`, `Difficulty` for the user if they didnt specify it and tell the user about it.
-   - When `update_task`, you must provide the before and after the user
-   - When `delete_task`, You must seek a confirmation from the user
+def _convert_keys_to_snake_case(d):
+    """Recursively converts all keys in a dictionary to snake_case."""
+    if not isinstance(d, dict):
+        return d
+    return {_to_snake_case(k): _convert_keys_to_snake_case(v) for k, v in d.items()}
 
-   
-**2. How to Create and Manage Scheduled Actions**
-   - When creating with `schedule_action`, you MUST provide a unique `description` for the user to refer to it later.
-     - Example: "Create a 'Daily Work Summary' to summarize tasks every weekday at 8am."
-   - To update or delete, use the `descriptionMatch` to find the action.
-     - Example: "Delete my 'Daily Work Summary' schedule." -> `delete_ai_action`
-     - Example: "Change my 'Daily Work Summary' to run at 9am instead." -> `update_ai_action`
-
-**3.  Managing Memories & Reminders:**
-    *   Use `update_memory`, `delete_memory`, `update_reminder`, and `delete_reminder` to manage existing items.
-    *   After listing the actions, the user will see the exact description (like *Daily Summary*).
-    *   When the user asks to update or delete one, you MUST use that exact string from the list in the `descriptionMatch` field. Do not paraphrase or translate it.
-
-**4.  Managing AI Scheduled Actions:**
-    *   When creating with `schedule_action`, you MUST provide a unique `description`.
-    *   To update or delete, use the `descriptionMatch` to find the correct action.   
-    *   If the user asks to "list", "show me", or "what are" my AI Actions or reminders, you MUST ALWAYS use the `list_ai_actions`
-    *   DO NOT answer from the context, even if the context appears to be empty. The tool will always get the most up-to-date information. 
-
-**5.  Distinguishing `set_reminder` vs. `schedule_action`:**
-    *   `set_reminder` is for a **ONE-TIME** alert on a **SPECIFIC** task.
-    *   `schedule_action` is for a **REPEATING** system action (like a daily summary).   
-    
-**6.  How to Reply About Tasks (VERY IMPORTANT for good UX):**
-    *   When a user asks for their tasks ("what are my tasks?", "show me my to-do list"), you should format your conversational reply in a helpful and detailed way.
-    *   **Group the tasks:** If tasks have a `category`, group them under category headings. If not, try to group them by a common `tag` if one exists.
-    *   **Sort the tasks:** Within each group, sort the tasks logically. Tasks with a `due_date` should come first, ordered by the soonest date. After that, sort by `priority` (high first).
-    *   *Show only Undone Task:** Unless ask you do not need to show task that is done
-    *   * Be as detail as possible, if the task is ongoing or has deadline show it
-    *   Example Reply:
-        "Here are your tasks:
-        
-        **Work:**
-        - Finish the quarterly report (Due: 2025-08-15) [High Priority]
-        - Prepare slides for Monday's meeting [Medium Priority]
-        
-        **Personal:**
-        - Call the plumber (Due: 2025-08-12)
-        - Buy groceries"
-
-**6. How to Handle Time & Reminders**
-You must handle two types of time requests differently.
-
-   - **RELATIVE Time ("in 10 minutes", "in 2 hours"):**
-     - IGNORE the user's timezone. It is not needed.
-     - Your ONLY job is to take the `Current UTC Time` and add the duration.
-     - Example: `Current UTC Time` is `2025-08-11T12:00:00Z` and user says "remind me in 15 minutes" -> `reminderTime` is `2025-08-11T12:15:00Z`.
-
-   - **ABSOLUTE Time ("at 5pm", "tomorrow at 9am"):**
-     - You MUST use the user's timezone from `USER_CONTEXT` to convert the user's local time into UTC.
-     - Example: `User Context` is `{{"timezone": "Asia/Jakarta"}}` (UTC+7) and user says "remind me at 10pm tonight" -> Your thought process: "22:00 in Jakarta is 15:00 in UTC. The `reminderTime` is `2025-08-11T15:00:00Z`."
-
-# **CONTEXT PROVIDED**
-# - `Current UTC Time`: {datetime.now(timezone.utc).isoformat()}
-# - `USER_CONTEXT`: Contains user preferences like `timezone`.
-# - `TASKS_CONTEXT`: The user's most recent tasks.
-# - `REMINDERS_CONTEXT`: A list of the user's upcoming reminders.
-# - `AI_ACTIONS_CONTEXT`: The user's currently active AI Actions.
-# - `MEMORY_CONTEXT`: The user's most recent memories.
-# - `CONVERSATION HISTORY`: The recent chat messages.
-     
-**GENERAL RULES**
-- Use the `CONVERSATION HISTORY` for context.
-- Use `TASK CONTEXT` to answer questions or find tasks.
-- For `tags`, always provide a JSON array of strings, e.g., `["work", "urgent"]`.
-- When updating, only include fields in the `patch` object that need to be changed.
-- Always include the JSON actions block, even if it's empty `[]`.
-- answer in the user language if possible
-- unless asked, never show a 'done' task
-- You must end your reply with a question that can help user and relevant to the conversation
-
-     
-**Important Nones**
-- Always include the JSON actions block, even if it's empty `[]`.
-- Reply the time in user timezone but use UTC in the database.
-
-
-""".strip()
-    # --- YOUR CURRENT _build_prompt FUNCTION ---
-    def _build_prompt(self, history: List[Dict[str, str]], context: Dict[str, Any]) -> str:
-        """Build the complete prompt, including history and all context."""
-        prompt_template = self.SYSTEM_PROMPT
-        
-        # Extract all contexts for clarity
-        category_context = context.get('category_context', {})
-        task_context = {"tasks": context.get("tasks", [])}
-        memory_context = context.get('memory_context', {}) # Added memory context
-        user_context = context.get('user_context', {})
-
-        formatted_history = "\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in history])
-
-        # This prompt structure is slightly different but functionally correct.
-        full_prompt = (
-            f"{prompt_template}\n\n"
-            f"--- START OF CONTEXT DATA ---\n"
-            f"USER_CONTEXT:\n{json.dumps(user_context, indent=2)}\n\n"
-            f"MEMORY_CONTEXT:\n{json.dumps(memory_context, indent=2)}\n\n"
-            f"category_context:\n{json.dumps(category_context, indent=2)}\n\n"
-            f"TASK_CONTEXT:\n{json.dumps(task_context, indent=2)}\n\n"
-            f"--- END OF CONTEXT DATA ---\n\n"
-            f"CONVERSATION HISTORY:\n{formatted_history}\n\n"
-            f"ASSISTANT RESPONSE:"
-        )
-        return full_prompt
-    
-    # --- _parse_response FUNCTION ---
-    def _parse_response(self, response_text: str) -> Tuple[str, List[Dict[str, Any]]]:
-        """Parse the AI's raw text response into a message and a list of actions."""
-        if not response_text:
-            return "I didn't receive a proper response. Could you try again?", []
-        
-        logger.debug(f"Raw AI Output:\n{response_text}")
-        
-        conversational_reply = response_text.strip()
-        actions = []
-        
-        try:
-            # Assumes you have a utility function to safely extract JSON from a string
-            parsed_json = utils.extract_json_block(response_text)
-            
-            if parsed_json and isinstance(parsed_json, dict):
-                json_start_index = response_text.find("```json")
-                if json_start_index != -1:
-                    conversational_reply = response_text[:json_start_index].strip()
-                
-                actions = parsed_json.get("actions", [])
-                
-        except Exception as e:
-            logger.error(f"Error parsing JSON response: {e}")
-            actions = []
-        
-        if not conversational_reply:
-            conversational_reply = "OK."
-        
-        return conversational_reply, actions
-    
-    # --- run_agent_one_shot METHOD (INSIDE THE CLASS) ---
-    def run_agent_one_shot(
-        self, 
-        model: Any, 
-        history: List[Dict[str, str]], 
-        context: Optional[Dict[str, Any]] = None
-    ) -> Tuple[str, List[Dict[str, Any]]]:
-        """
-        This is the main method OF THE CLASS that runs the agent logic.
-        """
-        logger.info("AGENT CLASS: Running in One-Shot Mode...")
-        
-        context = context or {}
-        
-        if not history:
-            return "I didn't receive any message. How can I help?", []
-        
-        try:
-            full_prompt = self._build_prompt(history, context)
-            
-            ai_response = model.generate_content(full_prompt)
-            response_text = getattr(ai_response, 'text', str(ai_response or ""))
-            
-            conversational_reply, actions = self._parse_response(response_text)
-            
-            logger.info(f"Generated {len(actions)} actions")
-            logger.debug(f"Actions: {json.dumps(actions, indent=2)}")
-            
-            return conversational_reply, actions
-            
-        except Exception as e:
-            logger.error(f"Unexpected error in agent run: {e}", exc_info=True)
-            return "Sorry, I ran into an unexpected error. Please try again.", []
-
-# --- THE CRUCIAL WRAPPER FUNCTION (OUTSIDE THE CLASS) ---
-# This is the function that your app.py actually calls.
-
-def run_agent_one_shot(model: Any, history: List[Dict[str, str]], context: Dict[str, Any]) -> Tuple[str, List[Dict[str, Any]]]:
+def _find_task(supabase, user_id, id=None, titleMatch=None):
     """
-    This is the main entrypoint called by app.py.
-    It creates an instance of our agent class and runs it.
+    Finds a single task by querying the database.
+    Prioritizes ID if provided, otherwise uses title match.
     """
-    # Create an instance of the agent
-    agent_instance = SmartTaskAgent() 
-    # Call the method that lives ON THE INSTANCE
-    return agent_instance.run_agent_one_shot(model, history, context)
+    if id:
+        tasks = database.query_tasks(supabase, user_id, id=id)
+        if tasks:
+            return tasks[0]
+    if titleMatch:
+        # Use a title_like query for partial matching
+        tasks = database.query_tasks(supabase, user_id, title_like=titleMatch)
+        if tasks:
+            return tasks[0]
+    return None
+
+
+
+def _find_list_id_by_name(supabase, user_id, list_name):
+    """Finds the ID of a list by its name."""
+    if not list_name:
+        return None
+    lists = database.query_lists(supabase, user_id, name=list_name)
+    if lists:
+        return lists[0]['id']
+    print(f"TOOL: Could not find list with name '{list_name}'")
+    return None
+
+# --- FIX: Re-added from original working code to process list names in arguments ---
+def _process_list_name(supabase, user_id, args):
+    """Checks for a 'list' key in args, finds its ID, and replaces it with 'list_id'."""
+    if 'list' in args:
+        list_name = args.pop('list')
+        if list_name:
+            list_id = _find_list_id_by_name(supabase, user_id, list_name)
+            if list_id:
+                args['list_id'] = list_id
+        else:
+            # Handle cases where the list is explicitly set to null/none
+            args['list_id'] = None
+    return args
+
+# --- Task & Reminder Tools (Corrected Signatures) ---
+# ai_tools.py
+
+def add_task(supabase, user_id, **kwargs):
+    """Adds a new task."""
+    # FIX: Process list name and convert all keys to snake_case
+    processed_kwargs = _process_list_name(supabase, user_id, kwargs)
+    snake_case_args = _convert_keys_to_snake_case(processed_kwargs)
+
+    # --- START CORRECTION ---
+    # Standardize the 'difficulty' field to lowercase to match the database constraint.
+    if 'difficulty' in snake_case_args and isinstance(snake_case_args.get('difficulty'), str):
+        snake_case_args['difficulty'] = snake_case_args['difficulty'].lower()
+    # --- END CORRECTION ---
+    
+    database.add_task_entry(supabase, user_id, **snake_case_args)
+    return {"status": "ok", "message": f"I've added the task: '{kwargs.get('title')}'."}
+
+
+def update_task(supabase, user_id, id=None, titleMatch=None, patch=None):
+    """Updates an existing task."""
+    if not patch:
+        return {"status": "error", "message": "Patch data is required to update a task."}
+
+    task_to_update = _find_task(supabase, user_id, id=id, titleMatch=titleMatch)
+    if not task_to_update:
+        return {"status": "not_found", "message": f"I couldn't find a task matching '{titleMatch}' to update."}
+
+    # FIX: Process list name within the patch data
+    processed_patch = _process_list_name(supabase, user_id, patch)
+    snake_case_patch = _convert_keys_to_snake_case(processed_patch)
+    database.update_task_entry(supabase, user_id, task_to_update['id'], snake_case_patch)
+    return {"status": "ok", "message": f"I've updated the task: '{task_to_update['title']}'."}
+
+def delete_task(supabase, user_id, id=None, titleMatch=None):
+    """Deletes a specific task."""
+    task_to_delete = _find_task(supabase, user_id, id=id, titleMatch=titleMatch)
+    if not task_to_delete:
+        # FIX: Added back the check for missing arguments
+        if not id and not titleMatch:
+            return {"status": "error", "message": "You must provide a specific task title or ID to delete."}
+        return {"status": "not_found", "message": f"I couldn't find task '{titleMatch}' to delete."}
+
+    database.delete_task_entry(supabase, user_id, task_to_delete['id'])
+    return {"status": "ok", "message": f"Deleted task '{task_to_delete['title']}'."}
+
+def complete_task(supabase, user_id, id=None, titleMatch=None, done=True):
+    """Marks a task as complete or incomplete."""
+    task_to_complete = _find_task(supabase, user_id, id=id, titleMatch=titleMatch)
+    if not task_to_complete:
+        return {"status": "not_found", "message": f"I couldn't find a task matching '{titleMatch}'."}
+    
+    status = "done" if done else "todo"
+    patch = {"status": status, "completed_at": datetime.now(pytz.utc).isoformat() if done else None}
+    
+    database.update_task_entry(supabase, user_id, task_to_complete['id'], patch)
+    status_text = "marked as done" if done else "moved back to your to-do list"
+    return {"status": "ok", "message": f"I've {status_text}: '{task_to_complete['title']}'."}
+
+def set_reminder(supabase, user_id, id=None, titleMatch=None, reminderTime=None):
+    """Sets a reminder for a specific task."""
+    if not reminderTime:
+        return {"status": "error", "message": "A specific reminder time is required."}
+        
+    task = _find_task(supabase, user_id, id=id, titleMatch=titleMatch)
+    if not task:
+        return {"status": "not_found", "message": f"I couldn't find the task '{titleMatch}' to set a reminder for."}
+        
+    patch = {"reminder_at": reminderTime, "reminder_sent": False}
+    database.update_task_entry(supabase, user_id, task['id'], patch)
+    return {"status": "ok", "message": f"Reminder set for '{task['title']}'."}
+
+def update_reminder(supabase, user_id, id=None, titleMatch=None, newReminderTime=None):
+    """Updates the reminder time for a specific task."""
+    task = _find_task(supabase, user_id, id=id, titleMatch=titleMatch)
+    if not task:
+        return {"status": "not_found", "message": f"I couldn't find a task matching '{titleMatch}'."}
+    
+    patch = {"reminder_at": newReminderTime, "reminder_sent": False}
+    database.update_task_entry(supabase, user_id, task['id'], patch)
+    return {"status": "ok", "message": f"I've updated the reminder for '{task['title']}'."}
+
+def delete_reminder(supabase, user_id, id=None, titleMatch=None):
+    """Deletes a reminder from a specific task."""
+    task = _find_task(supabase, user_id, id=id, titleMatch=titleMatch)
+    if not task:
+        return {"status": "not_found", "message": f"I couldn't find a task matching '{titleMatch}'."}
+    
+    patch = {"reminder_at": None, "reminder_sent": None}
+    database.update_task_entry(supabase, user_id, task['id'], patch)
+    return {"status": "ok", "message": f"I've removed the reminder from '{task['title']}'."}
+
+def list_all_reminders(supabase, user_id):
+    """Fetches and formats a list of all tasks that have an active reminder."""
+    try:
+        reminders = database.get_all_reminders(supabase, user_id)
+    except Exception as e:
+        print(f"!!! TOOL ERROR in list_all_reminders: {e}")
+        return "I had trouble retrieving your list of reminders right now."
+
+    if not reminders:
+        return "You don't have any reminders set at the moment."
+
+    response_lines = ["Here are your active reminders:"]
+    for reminder in reminders:
+        reminder_time_utc = datetime.fromisoformat(reminder['reminder_at'].replace('Z', '+00:00'))
+        response_lines.append(f"  - For task *'{reminder['title']}'* at `{reminder_time_utc.strftime('%Y-%m-%d %H:%M')} UTC`")
+    
+    return "\n".join(response_lines)
+
+
+# --- Memory Tools (from refactored code) ---
+
+def add_memory(supabase, user_id, title=None, content=None):
+    if not title: return {"status": "error", "message": "A title for the memory is required."}
+    database.add_memory_entry(supabase, user_id, title, content)
+    return {"status": "ok", "message": f"I'll remember that: '{title}'."}
+
+def update_memory(supabase, user_id, titleMatch=None, patch=None):
+    if not titleMatch or not patch: return {"status": "error", "message": "A title and data to update are required."}
+    memory = database.find_memory_by_title(supabase, user_id, titleMatch)
+    if not memory: return {"status": "not_found", "message": f"I couldn't find a memory matching '{titleMatch}'."}
+    database.update_memory_entry(supabase, user_id, memory['id'], patch)
+    return {"status": "ok", "message": f"I've updated the memory: '{memory['title']}'."}
+
+def delete_memory(supabase, user_id, titleMatch=None):
+    if not titleMatch: return {"status": "error", "message": "Please tell me the title of the memory to delete."}
+    memory = database.find_memory_by_title(supabase, user_id, titleMatch)
+    if not memory: return {"status": "not_found", "message": f"I couldn't find a memory matching '{titleMatch}'."}
+    database.delete_memory_entry(supabase, user_id, memory['id'])
+    return {"status": "ok", "message": f"I have deleted the memory: '{memory['title']}'."}
+
+def search_memories(supabase, user_id, query=None):
+    if not query: return "Please tell me what you want to search for."
+    results = database.search_memory_entries(supabase, user_id, query)
+    if not results: return f"I couldn't find any memories matching '{query}'."
+    response_lines = [f"I found {len(results)} memories matching '{query}':"]
+    for i, item in enumerate(results):
+        line = f"{i+1}. **{item['title']}**"
+        if item.get('content'): line += f": {item['content']}"
+        response_lines.append(line)
+    return "\n".join(response_lines)
+
+
+# --- Scheduled Action Tools & Helpers (from refactored code) ---
+
+def _build_and_validate_schedule_spec(schedule: dict) -> tuple[str | None, str | None]:
+    if not isinstance(schedule, dict): return None, "The schedule format was invalid."
+    at_time = schedule.get("at_time")
+    if not at_time or ':' not in at_time: return None, "A specific time in HH:MM format is required for the schedule."
+
+    DAY_MAP = {"SU": 0, "MO": 1, "TU": 2, "WE": 3, "TH": 4, "FR": 5, "SA": 6}
+    try:
+        time_parts = at_time.split(':')
+        if len(time_parts) != 2: return None, "The time needs to be in HH:MM format (e.g., 07:00 or 19:30)."
+        minute, hour = time_parts[1], time_parts[0]
+        
+        day_of_week_str = "*"
+        if schedule.get("frequency") == "WEEKLY" and schedule.get("by_day"):
+            day_codes = [str(DAY_MAP[day.upper()]) for day in schedule["by_day"] if day.upper() in DAY_MAP]
+            if not day_codes: return None, "The schedule specified an invalid day of the week."
+            day_of_week_str = ",".join(day_codes)
+
+        cron_schedule = f"{minute} {hour} * * {day_of_week_str}"
+    except Exception:
+        return None, "I couldn't understand that schedule's structure."
+
+    try:
+        cron = croniter(cron_schedule, datetime.now(pytz.utc))
+        first = cron.get_next(datetime)
+        second = cron.get_next(datetime)
+        if (second - first).total_seconds() < 3540:
+            return None, "Actions can only be scheduled once per hour at most."
+    except Exception:
+        return None, "That schedule pattern is invalid."
+    return cron_schedule, None
+
+def _find_item_from_list(items: list, match_query: str, key: str):
+    if not items or not match_query: return None
+    query_keywords = set(match_query.lower().split())
+    for item in items:
+        description = item.get(key, "").lower()
+        if not description: continue
+        if query_keywords.issubset(description.split()): return item
+    return None
+
+def schedule_ai_action(supabase, user_id, action_type=None, schedule=None, description=None, payload=None):
+    if not all([action_type, schedule, description]):
+        return {"status": "error", "message": "Action type, schedule, and description are required."}
+    
+    user_context = database.get_user_context_for_ai(supabase, user_id)
+    limit = user_context.get('schedule_limit', 5)
+    if database.count_active_ai_actions(supabase, user_id) >= limit:
+        return {"status": "limit_reached", "message": f"You have reached your plan's limit of {limit} AI Actions."}
+
+    cron_schedule, error = _build_and_validate_schedule_spec(schedule)
+    if error: return {"status": "error", "message": error}
+
+    user_tz = pytz.timezone(user_context.get("timezone", "UTC"))
+    next_run_utc = croniter(cron_schedule, datetime.now(user_tz)).get_next(datetime).astimezone(pytz.utc)
+    
+    database.add_ai_action(supabase, user_id, action_type, cron_schedule, next_run_utc.isoformat(), user_tz.zone, description, payload)
+    return {"status": "ok", "message": f"I've scheduled '{description}' for you."}
+
+def update_ai_action(supabase, user_id, descriptionMatch=None, patch=None):
+    if not descriptionMatch or not patch: return {"status": "error", "message": "A description and data to update are required."}
+
+    all_actions = database.get_all_active_ai_actions(supabase, user_id)
+    action_to_update = _find_item_from_list(all_actions, descriptionMatch, key="description")
+
+    if not action_to_update: return {"status": "not_found", "message": f"I couldn't find an AI Action matching '{descriptionMatch}'."}
+    
+    if 'schedule' in patch:
+        new_schedule = patch.pop('schedule')
+        cron_schedule, error = _build_and_validate_schedule_spec(new_schedule)
+        if error: return {"status": "error", "message": error}
+        patch['schedule_spec'] = cron_schedule
+        user_context = database.get_user_context_for_ai(supabase, user_id)
+        user_tz = pytz.timezone(user_context.get("timezone", "UTC"))
+        patch['next_run_at'] = croniter(cron_schedule, datetime.now(user_tz)).get_next(datetime).astimezone(pytz.utc).isoformat()
+
+    database.update_ai_action_entry(supabase, user_id, action_to_update['id'], patch)
+    return {"status": "ok", "message": f"I've updated the AI Action: '{action_to_update['description']}'."}
+
+def delete_ai_action(supabase, user_id, descriptionMatch=None):
+    if not descriptionMatch: return {"status": "error", "message": "Please provide the description of the AI Action to delete."}
+    all_actions = database.get_all_active_ai_actions(supabase, user_id)
+    action_to_delete = _find_item_from_list(all_actions, descriptionMatch, key="description")
+    
+    if not action_to_delete: return {"status": "not_found", "message": f"I couldn't find an AI Action matching '{descriptionMatch}'."}
+    
+    database.delete_ai_action_entry(supabase, user_id, action_to_delete['id'])
+    return {"status": "ok", "message": f"I have deleted the AI Action: '{action_to_delete['description']}'."}
+
+def _describe_cron_schedule(schedule_spec: str, user_tz_str: str = "UTC") -> str:
+    if not schedule_spec: return "No schedule set"
+    try:
+        parts = schedule_spec.split()
+        if len(parts) != 5: return schedule_spec
+
+        minute, hour, _, _, day_of_week = parts
+        
+        utc_dt = datetime.now(pytz.utc).replace(hour=int(hour), minute=int(minute), second=0, microsecond=0)
+        user_tz = pytz.timezone(user_tz_str)
+        local_dt = utc_dt.astimezone(user_tz)
+        time_str = local_dt.strftime('%H:%M')
+
+        if day_of_week == "*": return f"every day at {time_str}"
+        
+        day_map = {"0": "Sunday", "1": "Monday", "2": "Tuesday", "3": "Wednesday", "4": "Thursday", "5": "Friday", "6": "Saturday"}
+        days = sorted([int(d) for d in day_of_week.split(',')])
+        
+        if days == [1, 2, 3, 4, 5]: return f"every weekday at {time_str}"
+        if days == [0, 6]: return f"every weekend at {time_str}"
+
+        day_names = [day_map[str(d)] for d in days]
+        return f"every {', '.join(day_names)} at {time_str}"
+        
+    except Exception as e:
+        print(f"!!! Error describing cron: {e}")
+        return schedule_spec
+
+def list_ai_actions(supabase, user_id):
+    try:
+        actions = database.get_all_active_ai_actions(supabase, user_id)
+        user_context = database.get_user_context_for_ai(supabase, user_id)
+        user_tz_str = user_context.get("timezone", "UTC")
+    except Exception: return "I had trouble retrieving your AI Actions."
+
+    if not actions: return "You don't have any active AI Actions."
+
+    response_lines = ["Here are your automated AI Actions:"]
+    for action in actions:
+        human_schedule = _describe_cron_schedule(action['schedule_spec'], user_tz_str)
+        response_lines.append(f"  - *{action['description']}* (Runs: {human_schedule})")
+    return "\n".join(response_lines)
+
+# --- The Master Dictionary of All Available Tools ---
+AVAILABLE_TOOLS = {
+    # Tasks
+    "add_task": add_task, "update_task": update_task, "delete_task": delete_task, "complete_task": complete_task,
+    # Reminders for Tasks
+    "set_reminder": set_reminder, "update_reminder": update_reminder, "delete_reminder": delete_reminder, "list_all_reminders": list_all_reminders,
+    # Memories
+    "add_memory": add_memory, "update_memory": update_memory, "delete_memory": delete_memory, "search_memories": search_memories,
+    # AI Actions (Scheduled Actions)
+    "schedule_ai_action": schedule_ai_action, "update_ai_action": update_ai_action, "delete_ai_action": delete_ai_action, "list_ai_actions": list_ai_actions,
+}
+
+
+
+
