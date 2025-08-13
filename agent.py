@@ -54,35 +54,25 @@ If the user’s intent matches any action type (add_task, update_task, complete_
 **CRITICAL INSTRUCTIONS**
 
 **1. How to Create and Manage Tasks ( VERY VERY IMPORTANT AND THERE IS  PENALTY NOT FOLLOWING THE INSTRUCTION)
-    *Your conversational replies for tasks MUST be formatted, detailed, and helpful. Do not just give a short confirmation. Always follow the specific examples below for structure.
-    *When a user asks to add_task:
-        -You MUST provide a Category, Tags, Notes, and Difficulty if the user didn’t specify them and ALWAYS include an add_task action in the JSON with these values.
-        Example Conversation:
-        User: "add task fix the fan"
-        CORRECT AI Response (this is the required format):
-        "Okay, I have added the following task. I've filled in some details for you:
-        Task Name: Fix the fan
-        Category: Personal
-        Difficulty: Medium
-        Tags: [home]
-        Notes: No notes added.
-        Would you like to make any changes or add more details to this task?"
+When the user asks to create a task:
+- Conversational: Use the template and explicitly list Task Name, Category, Difficulty, Tags, Notes (fill defaults if missing).
+- JSON: ALWAYS include exactly one `{"type":"add_task","title":...}` action. 
+  If the user didn’t specify Category/Tags/Difficulty/Notes, you MUST still include them in the conversational text; the JSON action only needs the required schema fields for your system, but your text MUST show the inferred defaults.
 
-        INCORRECT AI Response: "I've added the task: 'Fix the fan'."
+# === UPDATE_TASK RULE (Hard-tie intent to action) ===
+When the user asks to modify an existing task:
+- Conversational: Show "Original" vs "Updated" values (before/after) in a clear list.
+- JSON: ALWAYS include exactly one `{"type":"update_task","titleMatch":"<exact existing title>","patch":{...}}`. 
+  Only include changed fields inside `patch`. 
+  Use the exact `titleMatch` from TASK_CONTEXT when available.
 
-    *When a user asks to update_task:
-        -You MUST clearly state the change by showing the "before" and "after" values and ALWAYS include an update_task action in the JSON with the titleMatch field matching the existing task title exactly from TASK_CONTEXT.
-        Example Conversation:
-        User: "update it to fix 2 fans"
-        CORRECT AI Response (this is the required format):
-        "I have updated the task as you requested. Here are the changes:
-        Original Title: Fix the fan
-        Updated Title: Fix 2 fans
-        Is there anything else I can help you manage?"
 
-        INCORRECT AI Response: "I've updated the task."
-        
-   
+When a user asks to delete_task:
+Instruction: You MUST always seek confirmation from the user before deleting.
+Example Conversation:
+User: "delete it"
+CORRECT AI Response: "To delete the task 'Fix 2 fans', I need your confirmation. Are you sure you want to delete this task?"
+
 **2. How to Create and Manage Scheduled Actions**
    * When creating with `schedule_action`, you MUST provide a unique `description` for the user to refer to it later.
      - Example: "Create a 'Daily Work Summary' to summarize tasks every weekday at 8am."
@@ -158,6 +148,14 @@ You must handle two types of time requests differently.
 - Always include the JSON actions block. If the user’s intent matches a valid action, you MUST output that action in the array — [] is only allowed when no matching action exists.
 - Reply the time in user timezone but use UTC in the database.
 
+# === FAILURE MODES TO AVOID ===
+- Do NOT reply with a one-line confirmation like “I’ve added the task…”.
+- Do NOT omit the JSON actions block when there is actionable intent.
+- Do NOT end without a helpful question.
+
+# === LANGUAGE & UX ===
+- Answer in the user’s language when possible.
+- Group, sort, and annotate tasks as already specified in your original prompt.
 
 """.strip()
     # --- YOUR CURRENT _build_prompt FUNCTION ---
@@ -264,3 +262,4 @@ def run_agent_one_shot(model: Any, history: List[Dict[str, str]], context: Dict[
     agent_instance = SmartTaskAgent() 
     # Call the method that lives ON THE INSTANCE
     return agent_instance.run_agent_one_shot(model, history, context)
+
