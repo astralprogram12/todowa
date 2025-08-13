@@ -38,13 +38,39 @@ def _find_task(supabase, user_id, id=None, titleMatch=None):
 
 
 
+def _find_list_id_by_name(supabase, user_id, list_name):
+    """Finds the ID of a list by its name."""
+    if not list_name:
+        return None
+    lists = database.query_lists(supabase, user_id, name=list_name)
+    if lists:
+        return lists[0]['id']
+    print(f"TOOL: Could not find list with name '{list_name}'")
+    return None
+
+# --- FIX: Re-added from original working code to process list names in arguments ---
+def _process_list_name(supabase, user_id, args):
+    """Checks for a 'list' key in args, finds its ID, and replaces it with 'list_id'."""
+    if 'list' in args:
+        list_name = args.pop('list')
+        if list_name:
+            list_id = _find_list_id_by_name(supabase, user_id, list_name)
+            if list_id:
+                args['list_id'] = list_id
+        else:
+            # Handle cases where the list is explicitly set to null/none
+            args['list_id'] = None
+    return args
+
 # --- Task & Reminder Tools (Corrected Signatures) ---
 
 def add_task(supabase, user_id, **kwargs):
-
-    # The result of the database operation is returned directly
-    return database.add_task_entry(supabase, user_id, **snake_case_args)
-
+    """Adds a new task."""
+    # FIX: Process list name and convert all keys to snake_case
+    processed_kwargs = _process_list_name(supabase, user_id, kwargs)
+    snake_case_args = _convert_keys_to_snake_case(processed_kwargs)
+    database.add_task_entry(supabase, user_id, **snake_case_args)
+    return {"status": "ok", "message": f"I've added the task: '{kwargs.get('title')}'."}
 def update_task(supabase, user_id, id=None, titleMatch=None, patch=None):
     """Updates an existing task."""
     if not patch:
@@ -314,6 +340,7 @@ AVAILABLE_TOOLS = {
     # AI Actions (Scheduled Actions)
     "schedule_ai_action": schedule_ai_action, "update_ai_action": update_ai_action, "delete_ai_action": delete_ai_action, "list_ai_actions": list_ai_actions,
 }
+
 
 
 
