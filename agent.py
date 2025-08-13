@@ -40,7 +40,13 @@ class SmartTaskAgent:
         {{ "type": "delete_ai_action", "descriptionMatch": "string" }}
     ]
     }}
+
+    
+    # === LENGTH FLOOR ===
+    The conversational section is INVALID if it is shorter than 50 words OR if any required heading is missing.
+    
     CONTEXT PROVIDED
+
 
     Current UTC Time: {datetime.now(timezone.utc).isoformat()}
 
@@ -288,5 +294,6 @@ def run_agent_one_shot(model: Any, history: List[Dict[str, str]], context: Dict[
     agent_instance = SmartTaskAgent() 
     # Call the method that lives ON THE INSTANCE
     return agent_instance.run_agent_one_shot(model, history, context)
+
 
 
