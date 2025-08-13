@@ -2,5 +2,6 @@ flask
 supabase
 google-generativeai
 croniter
+pytz
 
 
