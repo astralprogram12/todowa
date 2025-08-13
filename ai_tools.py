@@ -41,7 +41,7 @@ def _find_task(supabase, user_id, id=None, titleMatch=None):
 # --- Task & Reminder Tools (Corrected Signatures) ---
 
 def add_task(supabase, user_id, **kwargs):
-    snake_case_args = _convert_keys_to_snake_case(processed_kwargs)
+
     # The result of the database operation is returned directly
     return database.add_task_entry(supabase, user_id, **snake_case_args)
 
@@ -314,5 +314,6 @@ AVAILABLE_TOOLS = {
     # AI Actions (Scheduled Actions)
     "schedule_ai_action": schedule_ai_action, "update_ai_action": update_ai_action, "delete_ai_action": delete_ai_action, "list_ai_actions": list_ai_actions,
 }
+
 
 
