@@ -21,7 +21,7 @@ app = Flask(__name__)
 # This will fail gracefully if the environment variables are not set.
 try:
     genai.configure(api_key=config.GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-2.5-flash')
+    model = genai.GenerativeModel('gemini-2.5-flash-lite')
     supabase: Client = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
 except Exception as e:
     print(f"!!! FATAL ERROR: Could not initialize services. Check your environment variables. Error: {e}")
@@ -193,5 +193,6 @@ if __name__ == '__main__':
     port = 5000
     print(f"--- Starting production server with Waitress on port {port} ---")
     serve(app, host='0.0.0.0', port=port)
+
 
 
