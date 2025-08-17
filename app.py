@@ -9,7 +9,7 @@ import traceback
 # --- Local Imports ---
 # Ensure these files exist in the same directory and are correctly named.
 import config
-import database
+import database_personal
 import services
 import agent
 from ai_tools import AVAILABLE_TOOLS
@@ -20,12 +20,18 @@ app = Flask(__name__)
 # Configure AI and Supabase from your config.py file
 # This will fail gracefully if the environment variables are not set.
 try:
+    if not all([config.GEMINI_API_KEY, config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY]):
+        raise ValueError("One or more critical environment variables (GEMINI, SUPABASE) are missing.")
+
     genai.configure(api_key=config.GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-2.5-flash')
+    model = genai.GenerativeModel('gemini-2.5-flash-lite')
     supabase: Client = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
+
 except Exception as e:
     print(f"!!! FATAL ERROR: Could not initialize services. Check your environment variables. Error: {e}")
-    # In a real production scenario, you might exit or have more robust health checks.
+    traceback.print_exc()
+    # Exit the application if critical services cannot be loaded.
+    sys.exit(1)
 
 # In-memory cache for conversation history.
 # For production, consider using a persistent cache like Redis for better scalability.
@@ -47,10 +53,10 @@ def test_list_ai_actions():
 
     try:
         # This directly calls the function we want to test.
-        actions = database.get_all_active_ai_actions(supabase, test_user_id)
+        actions = database_personal.get_all_active_ai_actions(supabase, test_user_id)
         
         # We print the raw result directly to your console.
-        print("--- RAW RESPONSE FROM database.get_all_active_ai_actions ---")
+        print("--- RAW RESPONSE FROM database_personal.get_all_active_ai_actions ---")
         print(actions)
         print("----------------------------------------------------------")
 
@@ -83,8 +89,8 @@ def webhook():
         if not sender_phone or not message_text:
             return jsonify({"status": "error", "message": "Missing sender or message"}), 400
 
-        user_id = database.get_user_id_by_phone(supabase, sender_phone)
-        is_allowed, limit_message = database.check_and_update_usage(supabase, sender_phone, user_id)
+        user_id = database_personal.get_user_id_by_phone(supabase, sender_phone)
+        is_allowed, limit_message = database_personal.check_and_update_usage(supabase, sender_phone, user_id)
 
         if not is_allowed:
             services.send_fonnte_message(sender_phone, limit_message)
@@ -103,13 +109,13 @@ def webhook():
         print("\n--- AGENT RUN ---")
         
         # Fetch all context types required by the agent's system prompt
-        task_data = database.get_task_context_for_ai(supabase, user_id)
+        task_data = database_personal.get_task_context_for_ai(supabase, user_id)
   
-        memory_data = database.get_memory_context_for_ai(supabase, user_id)
-        user_data = database.get_user_context_for_ai(supabase, user_id)
+        memory_data = database_personal.get_memory_context_for_ai(supabase, user_id)
+        user_data = database_personal.get_user_context_for_ai(supabase, user_id)
         # --- NEW: ADD THE MISSING DATABASE CALL HERE ---
-        ai_actions_data = database.get_all_active_ai_actions(supabase, user_id)
-        reminders_data = database.get_all_reminders(supabase, user_id)
+        ai_actions_data = database_personal.get_all_active_ai_actions(supabase, user_id)
+        reminders_data = database_personal.get_all_reminders(supabase, user_id)
         # Combine all contexts into a single object for the agent
         full_context = {
             "tasks": task_data,
@@ -134,35 +140,21 @@ def webhook():
         CONVERSATION_HISTORIES[sender_phone] = history[-10:] # Keep last 5 user/assistant turns
 
         # --- 4. Execute the AI's Action Plan ---
-        final_reply = conversational_reply # Start with the AI's default reply
+        final_reply = conversational_reply  # <-- keep this as the default
 
         if actions:
             for action in actions:
                 action_type = action.get("type")
                 if action_type in AVAILABLE_TOOLS:
-                    action_args = {k: v for k, v in action.items() if k != 'type'}
+                    action_args = {k: v for k, v in action.items() if k not in ["type", "user_id"]}
+
                     try:
                         print(f"EXECUTING ACTION: {action_type} with args {action_args}")
                         tool_result = AVAILABLE_TOOLS[action_type](supabase, user_id, **action_args)
-                        
-                        # This logic for handling the result is still correct
-                        if isinstance(tool_result, str):
-                            final_reply = tool_result
-                        elif isinstance(tool_result, dict) and tool_result.get("message"):
-                            final_reply = tool_result["message"]
 
-                        # --- THE FIX IS HERE ---
-                        # This is a much simpler and more robust way to handle tool output.
-                        
-                        # If the tool returns a string, that string is our new final reply.
-                        # This will correctly handle list_ai_actions and search_memories.
-                        if isinstance(tool_result, str):
-                            final_reply = tool_result
-                            
-                        # If the tool returns a dictionary with a 'message' key, use that.
-                        # This handles all our other tools (add, update, delete, etc.).
-                        elif isinstance(tool_result, dict) and tool_result.get("message"):
-                            final_reply = tool_result["message"]
+                        # ✅ Only overwrite reply if the tool explicitly reports an error or important message
+                        if isinstance(tool_result, dict) and tool_result.get("error"):
+                            final_reply += f"\n\n(Note: {tool_result['error']})"
 
                     except Exception as e:
                         print(f"!!! TOOL EXECUTION FAILED for '{action_type}': {e}")
@@ -193,7 +185,6 @@ if __name__ == '__main__':
     port = 5000
     print(f"--- Starting production server with Waitress on port {port} ---")
     serve(app, host='0.0.0.0', port=port)
-
 
 
 

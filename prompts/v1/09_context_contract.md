@@ -1,0 +1,2 @@
+The runtime will provide blocks: Current UTC Time, USER_CONTEXT, MEMORY_CONTEXT, category_context,
+TASK_CONTEXT, REMINDERS_CONTEXT, AI_ACTIONS_CONTEXT, and CONVERSATION HISTORY.

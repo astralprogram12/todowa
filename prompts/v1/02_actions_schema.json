@@ -1,0 +1,38 @@
+{
+  "actions": [
+    { "type": "add_task", "title": "string", "notes?": "string", "dueDate?": "YYYY-MM-DDTHH:MM:SSZ",
+      "priority?": "low|medium|high", "category?": "string", "tags?": ["string"],
+      "url?": "string", "difficulty?": "easy|medium|hard" },
+
+    { "type": "update_task", "titleMatch": "string", "idMatch?": "string", "patch": {
+      "title?": "string", "notes?": "string", "dueDate?": "YYYY-MM-DDTHH:MM:SSZ",
+      "priority?": "low|medium|high", "category?": "string", "tags?": ["string"],
+      "estimateMinutes?": 0, "durationMinutes?": 0, "assignees?": ["string"],
+      "url?": "string", "difficulty?": "easy|medium|hard"
+    }},
+
+    { "type": "complete_task", "titleMatch": "string" },
+    { "type": "delete_task", "titleMatch": "string", "requiresConfirmation?": true },
+
+    { "type": "set_reminder", "titleMatch": "string", "reminderTime": "YYYY-MM-DDTHH:MM:SSZ" },
+    { "type": "update_reminder", "titleMatch": "string", "newReminderTime": "YYYY-MM-DDTHH:MM:SSZ" },
+    { "type": "delete_reminder", "titleMatch": "string" },
+    { "type": "snooze_reminder", "titleMatch": "string", "newReminderTime": "YYYY-MM-DDTHH:MM:SSZ" },
+
+    { "type": "add_memory", "title": "string", "content": "string?" },
+    { "type": "search_memories", "query": "string" },
+    { "type": "update_memory", "titleMatch": "string", "patch": { "title?": "string", "content?": "string" } },
+    { "type": "delete_memory", "titleMatch": "string" },
+
+    { "type": "schedule_ai_action",
+      "action_type": ["summarize_tasks", "create_recurring_task"],
+      "description": "string",
+      "schedule": { "frequency": ["DAILY", "WEEKLY", "MONTHLY", "HOURLY"],
+                     "by_day?": ["MO"], "at_time": "HH:MM", "timezone?": "string",
+                     "start_date?": "YYYY-MM-DD", "end_date?": "YYYY-MM-DD" },
+      "payload?": { "title?": "string" }
+    },
+    { "type": "update_ai_action", "descriptionMatch": "string", "patch": { "description?": "string", "schedule?": {} } },
+    { "type": "delete_ai_action", "descriptionMatch": "string" }
+  ]
+}
