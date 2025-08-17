@@ -124,19 +124,46 @@ def update_task(supabase, user_id, task_id=None, titleMatch=None, patch=None):
     return {"success": True, "updated": result.data}
 
 
-def complete_task(supabase, user_id=None, task_id=None, title=None, titleMatch=None, **kwargs):
-    title = title or titleMatch
-    if not task_id and not title:
-        return {"message": "No valid task_id(s) or title provided."}
+def complete_task(
+    supabase,
+    user_id=None,
+    task_ids=None,       # list of task IDs
+    title=None,
+    titleMatch=None,
+    **kwargs
+):
+    """
+    Mark one or multiple tasks as completed ("done").
+    Supports task_ids (list), exact title, or partial titleMatch.
+    """
+    if not task_ids and not title and not titleMatch:
+        return {"message": "No valid identifiers provided."}
 
-    query = supabase.table("tasks").update({"status": "completed"}).eq("user_id", user_id)
-    if task_id:
-        query = query.eq("id", task_id)
-    else:
-        query = query.eq("title", title)
-    result = query.execute()
+    query = supabase.table("tasks").update({"status": "done"}).eq("user_id", user_id)
 
-    return {"message": f"Marked task {task_id or title} as completed"}
+    updated = []
+
+    try:
+        if task_ids:
+            # Handle multiple IDs
+            result = query.in_("id", task_ids).execute()
+            updated.extend([t["id"] for t in result.data])
+        elif title:
+            # Exact title match
+            result = query.eq("title", title).execute()
+            updated.extend([t["id"] for t in result.data])
+        elif titleMatch:
+            # Partial title match (may update multiple tasks!)
+            result = query.ilike("title", f"%{titleMatch}%").execute()
+            updated.extend([t["id"] for t in result.data])
+
+        if not updated:
+            return {"message": "No tasks matched the criteria."}
+
+        return {"message": f"Marked {len(updated)} task(s) as done", "updated": updated}
+
+    except Exception as e:
+        return {"error": str(e)}
 
 
 def set_reminder(supabase, user_id, id=None, titleMatch=None, reminderTime=None):
@@ -368,6 +395,7 @@ AVAILABLE_TOOLS = {
     # AI Actions (Scheduled Actions)
     "schedule_ai_action": schedule_ai_action, "update_ai_action": update_ai_action, "delete_ai_action": delete_ai_action, "list_ai_actions": list_ai_actions,
 }
+
 
 
 
