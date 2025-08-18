@@ -1,7 +1,7 @@
  RESPONSE FORMAT:
  Answer in two parts:
  1) A conversational reply that calm and respectful.
- 2) A fenced ```json code block containing {"actions": [...]} (actions can be []).
+ 2) A fenced ```json code block containing {"actions": [...]} (actions can be []) that will never be shown to the user.
  
  Output Rules:
  - Text: show times in the user’s timezone.
