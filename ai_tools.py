@@ -68,15 +68,15 @@ def _log_action_with_timing(supabase, user_id, action_type, entity_type, entity_
                            error_details=None, session_id=None):
     """Helper function to log actions with execution timing."""
     try:
-        database_personal.add_action_log(
+        database_personal.log_action(
             supabase=supabase,
             user_id=user_id,
             action_type=action_type,
             entity_type=entity_type,
             entity_id=entity_id,
-            parameters=action_details or {},
-            success=success_status,
-            error_message=error_details,
+            action_details=action_details or {},
+            success_status=success_status,
+            error_details=error_details,
             execution_time_ms=action_details.get('execution_time_ms') if action_details else None
         )
     except Exception as e:
@@ -1586,6 +1586,244 @@ def list_ai_actions(supabase, user_id):
         response_lines.append(f"  - *{action['description']}* (Runs: {human_schedule})")
     return "\n".join(response_lines)
 
+def task_for_day(supabase, user_id):
+    """Shows today's tasks (due today or no deadline) with motivational copywriting."""
+    start_time = time.time()
+    
+    try:
+        today_tasks = database_personal.get_tasks_for_today(supabase, user_id)
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        
+        # Log the action
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="task_for_day",
+            entity_type="task",
+            action_details={
+                "tasks_count": len(today_tasks),
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        if not today_tasks:
+            return {
+                "status": "ok",
+                "message": "🌟 Amazing! You have a clean slate today! No urgent tasks or deadlines. This is the perfect time to focus on what truly matters to you or tackle something you've been putting off. What would make today feel productive and fulfilling?"
+            }
+        
+        # Create engaging copy based on task count
+        if len(today_tasks) == 1:
+            intro = "🎯 **Focus Mode Activated!** You have one key task calling for your attention today:"
+        elif len(today_tasks) <= 3:
+            intro = f"💪 **Power Day Ahead!** You've got {len(today_tasks)} important tasks to conquer today:"
+        else:
+            intro = f"🚀 **Action-Packed Day!** You have {len(today_tasks)} tasks ready for your attention. Let's break them down:"
+        
+        task_lines = [intro, ""]
+        
+        for i, task in enumerate(today_tasks, 1):
+            # Add emoji based on difficulty or category
+            emoji = "⚡" if task.get('difficulty') == 'easy' else "🔥" if task.get('difficulty') == 'hard' else "💫"
+            
+            line = f"{emoji} **{task['title']}**"
+            
+            # Add context clues
+            details = []
+            if task.get('due_date'):
+                details.append("📅 Due today")
+            else:
+                details.append("🎯 No deadline - perfect flexibility")
+                
+            if task.get('category'):
+                details.append(f"📂 {task['category']}")
+            
+            if details:
+                line += f" ({', '.join(details)})"
+            
+            if task.get('notes'):
+                line += f"\n   💭 *{task['notes']}*"
+            
+            task_lines.append(line)
+        
+        # Add motivational closing
+        if len(today_tasks) <= 2:
+            task_lines.append("\n✨ **You've got this!** These tasks are well within your capabilities. Take them one at a time and celebrate each completion!")
+        else:
+            task_lines.append("\n🎊 **Pro tip:** Pick your most important task first, then build momentum. You're going to have an incredibly productive day!")
+        
+        return {
+            "status": "ok",
+            "message": "\n".join(task_lines)
+        }
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        # Log failed action
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="task_for_day",
+            entity_type="task",
+            action_details={"execution_time_ms": execution_time_ms},
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {"status": "error", "message": f"I had trouble getting your tasks for today: {error_msg}"}
+
+def summary_of_day(supabase, user_id):
+    """Shows completed tasks for today with celebratory copywriting."""
+    start_time = time.time()
+    
+    try:
+        completed_tasks = database_personal.get_completed_tasks_for_today(supabase, user_id)
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        
+        # Log the action
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="summary_of_day",
+            entity_type="task",
+            action_details={
+                "completed_count": len(completed_tasks),
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        if not completed_tasks:
+            return {
+                "status": "ok",
+                "message": "🌱 **Every journey starts with a single step!** You haven't marked any tasks as complete today yet, but that's perfectly okay. Progress isn't always about checking boxes - sometimes it's about planning, thinking, or taking care of yourself. What small win can you celebrate today?"
+            }
+        
+        # Create celebratory copy based on completion count
+        if len(completed_tasks) == 1:
+            intro = "🎉 **Victory Achieved!** You completed an important task today:"
+        elif len(completed_tasks) <= 3:
+            intro = f"🏆 **Productivity Champion!** You crushed {len(completed_tasks)} tasks today:"
+        else:
+            intro = f"🚀 **Absolute Powerhouse!** You demolished {len(completed_tasks)} tasks today - that's incredible:"
+        
+        task_lines = [intro, ""]
+        
+        for i, task in enumerate(completed_tasks, 1):
+            # Add celebration emoji
+            emoji = "✅" if i % 3 == 1 else "🎯" if i % 3 == 2 else "💎"
+            
+            line = f"{emoji} **{task['title']}**"
+            
+            # Add completion context
+            details = []
+            if task.get('difficulty') == 'hard':
+                details.append("💪 Tough challenge conquered!")
+            elif task.get('difficulty') == 'easy':
+                details.append("⚡ Quick win!")
+            
+            if task.get('category'):
+                details.append(f"📂 {task['category']}")
+            
+            if details:
+                line += f" ({', '.join(details)})"
+            
+            task_lines.append(line)
+        
+        # Add motivational closing based on performance
+        if len(completed_tasks) == 1:
+            task_lines.append("\n🌟 **Well done!** Every completed task is a step forward. You're building positive momentum!")
+        elif len(completed_tasks) <= 3:
+            task_lines.append("\n🎊 **Outstanding work!** You're showing great focus and follow-through. This kind of consistency leads to amazing results!")
+        else:
+            task_lines.append("\n🎆 **You're on fire!** This level of productivity is truly impressive. You're not just getting things done - you're excelling at it!")
+        
+        return {
+            "status": "ok",
+            "message": "\n".join(task_lines)
+        }
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        # Log failed action
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="summary_of_day",
+            entity_type="task",
+            action_details={"execution_time_ms": execution_time_ms},
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {"status": "error", "message": f"I had trouble getting your daily summary: {error_msg}"}
+
+def ai_action_helper(supabase, user_id, **kwargs):
+    """General AI action assistance and guidance."""
+    start_time = time.time()
+    
+    try:
+        query = kwargs.get('query', '').lower()
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        
+        # Log the action
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="ai_action_helper",
+            entity_type="system",
+            action_details={
+                "query": query,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        # Provide contextual help based on query
+        if any(word in query for word in ['schedule', 'automate', 'recurring']):
+            return {
+                "status": "ok",
+                "message": "🤖 **AI Actions are your personal automation assistant!**\n\n**Available automations:**\n⏰ **Daily Summary** - Get automatic updates on your outstanding tasks\n🔄 **Recurring Tasks** - Auto-create tasks that repeat (like 'Weekly planning')\n\n**How to set up:**\n1. Use `schedule_ai_action` to create automations\n2. Set your schedule using cron format (daily, weekly, etc.)\n3. Sit back and let your AI handle the routine stuff!\n\n**Examples:**\n• Daily task summary every morning at 9 AM\n• Weekly goal review every Sunday\n• Monthly reflection reminder\n\nWant me to help you set up a specific automation?"
+            }
+        
+        elif any(word in query for word in ['today', 'daily', 'focus']):
+            return {
+                "status": "ok",
+                "message": "📅 **Daily Productivity Tools at your service!**\n\n🎯 **`task_for_day`** - See what needs your attention today\n   • Shows tasks due today + tasks with no deadline\n   • Motivational formatting to keep you energized\n   • Perfect for morning planning sessions\n\n🏆 **`summary_of_day`** - Celebrate what you've accomplished\n   • Shows all tasks you completed today\n   • Encouraging messages to boost your confidence\n   • Great for evening reflection\n\n💡 **Pro tip:** Use `task_for_day` in the morning to plan, `summary_of_day` in the evening to celebrate!"
+            }
+        
+        else:
+            # General help
+            return {
+                "status": "ok",
+                "message": "🎉 **Welcome to your AI Action toolkit!**\n\n**🚀 Quick Actions:**\n• `task_for_day` - What should I focus on today?\n• `summary_of_day` - What did I accomplish today?\n\n**🤖 Automation (AI Actions):**\n• `schedule_ai_action` - Set up recurring automations\n• `list_ai_actions` - See your current automations\n• `update_ai_action` / `delete_ai_action` - Manage automations\n\n**💡 Popular automations:**\n• Daily task summaries (morning motivation)\n• Weekly goal check-ins\n• Monthly reflection reminders\n• Recurring task creation\n\n**Need specific help?** Ask me about 'scheduling automations' or 'daily productivity tools'!"
+            }
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        # Log failed action
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="ai_action_helper",
+            entity_type="system",
+            action_details={"execution_time_ms": execution_time_ms},
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {"status": "error", "message": f"I had trouble providing assistance: {error_msg}"}
+
 # --- The Master Dictionary of All Available Tools ---
 AVAILABLE_TOOLS = {
     # Tasks
@@ -1598,6 +1836,8 @@ AVAILABLE_TOOLS = {
     "add_journal": add_journal, "update_journal": update_journal, "delete_journal": delete_journal, "search_journals": search_journals,
     # AI Actions (Scheduled Actions)
     "schedule_ai_action": schedule_ai_action, "update_ai_action": update_ai_action, "delete_ai_action": delete_ai_action, "list_ai_actions": list_ai_actions,
+    # Daily Productivity Tools
+    "task_for_day": task_for_day, "summary_of_day": summary_of_day, "ai_action_helper": ai_action_helper,
 }
 
 
