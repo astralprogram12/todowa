@@ -4,6 +4,7 @@ import re
 from datetime import datetime
 import pytz
 from croniter import croniter
+import time
 
 # Local imports (ensure these files exist and are correct)
 import database_personal
@@ -62,115 +63,527 @@ def _process_list_name(supabase, user_id, args):
             args['list_id'] = None
     return args
 
+def _log_action_with_timing(supabase, user_id, action_type, entity_type, entity_id=None, 
+                           action_details=None, user_input=None, success_status=True, 
+                           error_details=None, session_id=None):
+    """Helper function to log actions with execution timing."""
+    try:
+        database_personal.add_action_log(
+            supabase=supabase,
+            user_id=user_id,
+            action_type=action_type,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            parameters=action_details or {},
+            success=success_status,
+            error_message=error_details,
+            execution_time_ms=action_details.get('execution_time_ms') if action_details else None
+        )
+    except Exception as e:
+        # Don't let logging errors break the main functionality
+        print(f"!!! ACTION LOGGING ERROR: {e}")
+
 # --- Task & Reminder Tools (Corrected Signatures) ---
 # ai_tools.py
 
 def add_task(supabase, user_id, **kwargs):
     """Adds a new task."""
-    # FIX: Process list name and convert all keys to snake_case
-    processed_kwargs = _process_list_name(supabase, user_id, kwargs)
-    snake_case_args = _convert_keys_to_snake_case(processed_kwargs)
-
-    # --- START CORRECTION ---
-    # Standardize the 'difficulty' field to lowercase to match the database constraint.
-    if 'difficulty' in snake_case_args and isinstance(snake_case_args.get('difficulty'), str):
-        snake_case_args['difficulty'] = snake_case_args['difficulty'].lower()
-    # --- END CORRECTION ---
+    start_time = time.time()
     
-    database_personal.add_task_entry(supabase, user_id, **snake_case_args)
-    return {"status": "ok", "message": f"I've added the task: '{kwargs.get('title')}'."}
+    try:
+        # FIX: Process list name and convert all keys to snake_case
+        processed_kwargs = _process_list_name(supabase, user_id, kwargs)
+        snake_case_args = _convert_keys_to_snake_case(processed_kwargs)
+
+        # --- START CORRECTION ---
+        # Standardize the 'difficulty' field to lowercase to match the database constraint.
+        if 'difficulty' in snake_case_args and isinstance(snake_case_args.get('difficulty'), str):
+            snake_case_args['difficulty'] = snake_case_args['difficulty'].lower()
+        # --- END CORRECTION ---
+        
+        result = database_personal.add_task_entry(supabase, user_id, **snake_case_args)
+        task_id = result.get('id') if result else None
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        
+        # Log successful action
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="add_task",
+            entity_type="task",
+            entity_id=task_id,
+            action_details={
+                "title": kwargs.get('title'),
+                "parameters": snake_case_args,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        return {"status": "ok", "message": f"I've added the task: '{kwargs.get('title')}'."}
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        # Log failed action
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="add_task",
+            entity_type="task",
+            action_details={
+                "title": kwargs.get('title'),
+                "parameters": kwargs,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {"status": "error", "message": f"Failed to add task: {error_msg}"}
 
 
 def delete_task(supabase, user_id=None, task_id=None, title=None, titleMatch=None, **kwargs):
+    start_time = time.time()
     title = title or titleMatch
-    if not task_id and not title:
-        return {"message": "No valid task_id(s) or title provided."}
+    
+    try:
+        if not task_id and not title:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="delete_task",
+                entity_type="task",
+                action_details={"execution_time_ms": execution_time_ms},
+                success_status=False,
+                error_details="No valid task_id or title provided"
+            )
+            return {"message": "No valid task_id(s) or title provided."}
 
-    query = supabase.table("tasks").delete().eq("user_id", user_id)
-    if task_id:
-        query = query.eq("id", task_id)
-    else:
-        query = query.eq("title", title)
-    result = query.execute()
+        query = supabase.table("tasks").delete().eq("user_id", user_id)
+        if task_id:
+            query = query.eq("id", task_id)
+        else:
+            query = query.eq("title", title)
+        result = query.execute()
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        
+        # Log successful action
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="delete_task",
+            entity_type="task",
+            entity_id=task_id,
+            action_details={
+                "task_id": task_id,
+                "title": title,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
 
-    return {"message": f"Deleted task(s) matching {task_id or title}"}
+        return {"message": f"Deleted task(s) matching {task_id or title}"}
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        # Log failed action
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="delete_task",
+            entity_type="task",
+            entity_id=task_id,
+            action_details={
+                "task_id": task_id,
+                "title": title,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {"status": "error", "message": f"Failed to delete task: {error_msg}"}
 
 
 def update_task(supabase, user_id, task_id=None, titleMatch=None, patch=None):
-    if not task_id and not titleMatch:
-        return {"error": "No task identifier provided"}
+    start_time = time.time()
+    
+    try:
+        if not task_id and not titleMatch:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="update_task",
+                entity_type="task",
+                action_details={"execution_time_ms": execution_time_ms},
+                success_status=False,
+                error_details="No task identifier provided"
+            )
+            return {"error": "No task identifier provided"}
 
-    # Find task by task_id or titleMatch
-    query = supabase.table("tasks").select("*").eq("user_id", user_id)
-    if task_id:
-        query = query.eq("id", task_id)
-    elif titleMatch:
-        query = query.ilike("title", f"%{titleMatch}%")
+        # Find task by task_id or titleMatch
+        query = supabase.table("tasks").select("*").eq("user_id", user_id)
+        if task_id:
+            query = query.eq("id", task_id)
+        elif titleMatch:
+            query = query.ilike("title", f"%{titleMatch}%")
 
-    task = query.execute()
-    if not task.data:
-        return {"error": "Task not found"}
+        task = query.execute()
+        if not task.data:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="update_task",
+                entity_type="task",
+                entity_id=task_id,
+                action_details={
+                    "task_id": task_id,
+                    "titleMatch": titleMatch,
+                    "execution_time_ms": execution_time_ms
+                },
+                success_status=False,
+                error_details="Task not found"
+            )
+            return {"error": "Task not found"}
 
-    # Apply patch (can be title, due_date, priority, etc.)
-    update_fields = {}
-    if patch:
-        update_fields.update(patch)
+        # Apply patch (can be title, due_date, priority, etc.)
+        update_fields = {}
+        if patch:
+            update_fields.update(patch)
 
-    if not update_fields:
-        return {"error": "No fields to update"}
+        if not update_fields:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="update_task",
+                entity_type="task",
+                entity_id=task.data[0]["id"],
+                action_details={"execution_time_ms": execution_time_ms},
+                success_status=False,
+                error_details="No fields to update"
+            )
+            return {"error": "No fields to update"}
 
-    result = supabase.table("tasks").update(update_fields).eq("id", task.data[0]["id"]).execute()
+        result = supabase.table("tasks").update(update_fields).eq("id", task.data[0]["id"]).execute()
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        
+        # Log successful action
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="update_task",
+            entity_type="task",
+            entity_id=task.data[0]["id"],
+            action_details={
+                "task_id": task_id,
+                "titleMatch": titleMatch,
+                "patch": patch,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
 
-    return {"success": True, "updated": result.data}
+        return {"success": True, "updated": result.data}
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        # Log failed action
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="update_task",
+            entity_type="task",
+            entity_id=task_id,
+            action_details={
+                "task_id": task_id,
+                "titleMatch": titleMatch,
+                "patch": patch,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {"status": "error", "message": f"Failed to update task: {error_msg}"}
 
 
 def complete_task(supabase, user_id=None, task_id=None, title=None, titleMatch=None, **kwargs):
+    start_time = time.time()
     title = title or titleMatch
-    if not task_id and not title:
-        return {"message": "No valid task_id(s) or title provided."}
+    
+    try:
+        if not task_id and not title:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="complete_task",
+                entity_type="task",
+                action_details={"execution_time_ms": execution_time_ms},
+                success_status=False,
+                error_details="No valid task_id or title provided"
+            )
+            return {"message": "No valid task_id(s) or title provided."}
 
-    query = supabase.table("tasks").update({"status": "completed"}).eq("user_id", user_id)
-    if task_id:
-        query = query.eq("id", task_id)
-    else:
-        query = query.eq("title", title)
-    result = query.execute()
+        query = supabase.table("tasks").update({"status": "completed"}).eq("user_id", user_id)
+        if task_id:
+            query = query.eq("id", task_id)
+        else:
+            query = query.eq("title", title)
+        result = query.execute()
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        
+        # Log successful action
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="complete_task",
+            entity_type="task",
+            entity_id=task_id,
+            action_details={
+                "task_id": task_id,
+                "title": title,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
 
-    return {"message": f"Marked task {task_id or title} as completed"}
+        return {"message": f"Marked task {task_id or title} as completed"}
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        # Log failed action
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="complete_task",
+            entity_type="task",
+            entity_id=task_id,
+            action_details={
+                "task_id": task_id,
+                "title": title,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {"status": "error", "message": f"Failed to complete task: {error_msg}"}
 
 
 def set_reminder(supabase, user_id, id=None, titleMatch=None, reminderTime=None):
     """Sets a reminder for a specific task."""
-    if not reminderTime:
-        return {"status": "error", "message": "A specific reminder time is required."}
+    start_time = time.time()
+    
+    try:
+        if not reminderTime:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="set_reminder",
+                entity_type="reminder",
+                action_details={"execution_time_ms": execution_time_ms},
+                success_status=False,
+                error_details="A specific reminder time is required"
+            )
+            return {"status": "error", "message": "A specific reminder time is required."}
+            
+        task = _find_task(supabase, user_id, id=id, titleMatch=titleMatch)
+        if not task:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="set_reminder",
+                entity_type="reminder",
+                action_details={
+                    "titleMatch": titleMatch,
+                    "reminderTime": reminderTime,
+                    "execution_time_ms": execution_time_ms
+                },
+                success_status=False,
+                error_details=f"Task '{titleMatch}' not found"
+            )
+            return {"status": "not_found", "message": f"I couldn't find the task '{titleMatch}' to set a reminder for."}
+            
+        patch = {"reminder_at": reminderTime, "reminder_sent": False}
+        database_personal.update_task_entry(supabase, user_id, task['id'], patch)
         
-    task = _find_task(supabase, user_id, id=id, titleMatch=titleMatch)
-    if not task:
-        return {"status": "not_found", "message": f"I couldn't find the task '{titleMatch}' to set a reminder for."}
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="set_reminder",
+            entity_type="reminder",
+            entity_id=task['id'],
+            action_details={
+                "task_title": task['title'],
+                "reminderTime": reminderTime,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
         
-    patch = {"reminder_at": reminderTime, "reminder_sent": False}
-    database_personal.update_task_entry(supabase, user_id, task['id'], patch)
-    return {"status": "ok", "message": f"Reminder set for '{task['title']}'."}
+        return {"status": "ok", "message": f"Reminder set for '{task['title']}'."}
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="set_reminder",
+            entity_type="reminder",
+            action_details={
+                "titleMatch": titleMatch,
+                "reminderTime": reminderTime,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {"status": "error", "message": f"Failed to set reminder: {error_msg}"}
 
 def update_reminder(supabase, user_id, id=None, titleMatch=None, newReminderTime=None):
     """Updates the reminder time for a specific task."""
-    task = _find_task(supabase, user_id, id=id, titleMatch=titleMatch)
-    if not task:
-        return {"status": "not_found", "message": f"I couldn't find a task matching '{titleMatch}'."}
+    start_time = time.time()
     
-    patch = {"reminder_at": newReminderTime, "reminder_sent": False}
-    database_personal.update_task_entry(supabase, user_id, task['id'], patch)
-    return {"status": "ok", "message": f"I've updated the reminder for '{task['title']}'."}
+    try:
+        task = _find_task(supabase, user_id, id=id, titleMatch=titleMatch)
+        if not task:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="update_reminder",
+                entity_type="reminder",
+                action_details={
+                    "titleMatch": titleMatch,
+                    "newReminderTime": newReminderTime,
+                    "execution_time_ms": execution_time_ms
+                },
+                success_status=False,
+                error_details=f"Task '{titleMatch}' not found"
+            )
+            return {"status": "not_found", "message": f"I couldn't find a task matching '{titleMatch}'."}
+        
+        patch = {"reminder_at": newReminderTime, "reminder_sent": False}
+        database_personal.update_task_entry(supabase, user_id, task['id'], patch)
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="update_reminder",
+            entity_type="reminder",
+            entity_id=task['id'],
+            action_details={
+                "task_title": task['title'],
+                "newReminderTime": newReminderTime,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        return {"status": "ok", "message": f"I've updated the reminder for '{task['title']}'."}
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="update_reminder",
+            entity_type="reminder",
+            action_details={
+                "titleMatch": titleMatch,
+                "newReminderTime": newReminderTime,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {"status": "error", "message": f"Failed to update reminder: {error_msg}"}
 
 def delete_reminder(supabase, user_id, id=None, titleMatch=None):
     """Deletes a reminder from a specific task."""
-    task = _find_task(supabase, user_id, id=id, titleMatch=titleMatch)
-    if not task:
-        return {"status": "not_found", "message": f"I couldn't find a task matching '{titleMatch}'."}
+    start_time = time.time()
     
-    patch = {"reminder_at": None, "reminder_sent": None}
-    database_personal.update_task_entry(supabase, user_id, task['id'], patch)
-    return {"status": "ok", "message": f"I've removed the reminder from '{task['title']}'."}
+    try:
+        task = _find_task(supabase, user_id, id=id, titleMatch=titleMatch)
+        if not task:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="delete_reminder",
+                entity_type="reminder",
+                action_details={
+                    "titleMatch": titleMatch,
+                    "execution_time_ms": execution_time_ms
+                },
+                success_status=False,
+                error_details=f"Task '{titleMatch}' not found"
+            )
+            return {"status": "not_found", "message": f"I couldn't find a task matching '{titleMatch}'."}
+        
+        patch = {"reminder_at": None, "reminder_sent": None}
+        database_personal.update_task_entry(supabase, user_id, task['id'], patch)
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="delete_reminder",
+            entity_type="reminder",
+            entity_id=task['id'],
+            action_details={
+                "task_title": task['title'],
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        return {"status": "ok", "message": f"I've removed the reminder from '{task['title']}'."}
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="delete_reminder",
+            entity_type="reminder",
+            action_details={
+                "titleMatch": titleMatch,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {"status": "error", "message": f"Failed to delete reminder: {error_msg}"}
 
 def list_all_reminders(supabase, user_id):
     """Fetches and formats a list of all tasks that have an active reminder."""
@@ -229,43 +642,277 @@ def _auto_categorize_journal(title, content):
 
 def add_journal(supabase, user_id, title=None, content=None, category=None):
     """Adds a journal entry to the database, with automatic categorization."""
-    if not title: return {"status": "error", "message": "A title for the journal entry is required."}
+    start_time = time.time()
     
-    # Auto-categorize if no category provided
-    if not category:
-        category = _auto_categorize_journal(title, content)
-    
-    database_personal.add_journal_entry(supabase, user_id, title, content, category)
-    return {"status": "ok", "message": f"I've added a journal entry: '{title}' (Category: {category})."}
+    try:
+        if not title:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="add_journal",
+                entity_type="journal",
+                action_details={"execution_time_ms": execution_time_ms},
+                success_status=False,
+                error_details="A title for the journal entry is required"
+            )
+            return {"status": "error", "message": "A title for the journal entry is required."}
+        
+        # Auto-categorize if no category provided
+        if not category:
+            category = _auto_categorize_journal(title, content)
+        
+        result = database_personal.add_journal_entry(supabase, user_id, title, content, category)
+        journal_id = result.get('id') if result else None
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="add_journal",
+            entity_type="journal",
+            entity_id=journal_id,
+            action_details={
+                "title": title,
+                "category": category,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        return {"status": "ok", "message": f"I've added a journal entry: '{title}' (Category: {category})."}
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="add_journal",
+            entity_type="journal",
+            action_details={
+                "title": title,
+                "category": category,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {"status": "error", "message": f"Failed to add journal entry: {error_msg}"}
 
 def update_journal(supabase, user_id, titleMatch=None, patch=None):
     """Updates an existing journal entry."""
-    if not titleMatch or not patch: return {"status": "error", "message": "A title and data to update are required."}
-    journal = database_personal.find_journal_by_title(supabase, user_id, titleMatch)
-    if not journal: return {"status": "not_found", "message": f"I couldn't find a journal entry matching '{titleMatch}'."}
-    database_personal.update_journal_entry(supabase, user_id, journal['id'], patch)
-    return {"status": "ok", "message": f"I've updated the journal entry: '{journal['title']}'."}
+    start_time = time.time()
+    
+    try:
+        if not titleMatch or not patch:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="update_journal",
+                entity_type="journal",
+                action_details={"execution_time_ms": execution_time_ms},
+                success_status=False,
+                error_details="A title and data to update are required"
+            )
+            return {"status": "error", "message": "A title and data to update are required."}
+        
+        journal = database_personal.find_journal_by_title(supabase, user_id, titleMatch)
+        if not journal:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="update_journal",
+                entity_type="journal",
+                action_details={
+                    "titleMatch": titleMatch,
+                    "execution_time_ms": execution_time_ms
+                },
+                success_status=False,
+                error_details=f"Journal entry '{titleMatch}' not found"
+            )
+            return {"status": "not_found", "message": f"I couldn't find a journal entry matching '{titleMatch}'."}
+        
+        database_personal.update_journal_entry(supabase, user_id, journal['id'], patch)
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="update_journal",
+            entity_type="journal",
+            entity_id=journal['id'],
+            action_details={
+                "journal_title": journal['title'],
+                "titleMatch": titleMatch,
+                "patch": patch,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        return {"status": "ok", "message": f"I've updated the journal entry: '{journal['title']}'."}
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="update_journal",
+            entity_type="journal",
+            action_details={
+                "titleMatch": titleMatch,
+                "patch": patch,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {"status": "error", "message": f"Failed to update journal entry: {error_msg}"}
 
 def delete_journal(supabase, user_id, titleMatch=None):
     """Deletes a journal entry from the database."""
-    if not titleMatch: return {"status": "error", "message": "Please tell me the title of the journal entry to delete."}
-    journal = database_personal.find_journal_by_title(supabase, user_id, titleMatch)
-    if not journal: return {"status": "not_found", "message": f"I couldn't find a journal entry matching '{titleMatch}'."}
-    database_personal.delete_journal_entry(supabase, user_id, journal['id'])
-    return {"status": "ok", "message": f"I have deleted the journal entry: '{journal['title']}'."}
+    start_time = time.time()
+    
+    try:
+        if not titleMatch:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="delete_journal",
+                entity_type="journal",
+                action_details={"execution_time_ms": execution_time_ms},
+                success_status=False,
+                error_details="Please tell me the title of the journal entry to delete"
+            )
+            return {"status": "error", "message": "Please tell me the title of the journal entry to delete."}
+        
+        journal = database_personal.find_journal_by_title(supabase, user_id, titleMatch)
+        if not journal:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="delete_journal",
+                entity_type="journal",
+                action_details={
+                    "titleMatch": titleMatch,
+                    "execution_time_ms": execution_time_ms
+                },
+                success_status=False,
+                error_details=f"Journal entry '{titleMatch}' not found"
+            )
+            return {"status": "not_found", "message": f"I couldn't find a journal entry matching '{titleMatch}'."}
+        
+        database_personal.delete_journal_entry(supabase, user_id, journal['id'])
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="delete_journal",
+            entity_type="journal",
+            entity_id=journal['id'],
+            action_details={
+                "journal_title": journal['title'],
+                "titleMatch": titleMatch,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        return {"status": "ok", "message": f"I have deleted the journal entry: '{journal['title']}'."}
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="delete_journal",
+            entity_type="journal",
+            action_details={
+                "titleMatch": titleMatch,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {"status": "error", "message": f"Failed to delete journal entry: {error_msg}"}
 
 def search_journals(supabase, user_id, query=None):
     """Searches for journal entries by title or content."""
-    if not query: return "Please tell me what you want to search for."
-    results = database_personal.search_journal_entries(supabase, user_id, query)
-    if not results: return f"I couldn't find any journal entries matching '{query}'."
-    response_lines = [f"I found {len(results)} journal entries matching '{query}':"]
-    for i, item in enumerate(results):
-        line = f"{i+1}. **{item['title']}**"
-        if item.get('category'): line += f" [Category: {item['category']}]"
-        if item.get('content'): line += f": {item['content']}"
-        response_lines.append(line)
-    return "\n".join(response_lines)
+    start_time = time.time()
+    
+    try:
+        if not query:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="search_journals",
+                entity_type="journal",
+                action_details={"execution_time_ms": execution_time_ms},
+                success_status=False,
+                error_details="Please tell me what you want to search for"
+            )
+            return "Please tell me what you want to search for."
+        
+        results = database_personal.search_journal_entries(supabase, user_id, query)
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="search_journals",
+            entity_type="journal",
+            action_details={
+                "query": query,
+                "results_count": len(results) if results else 0,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        if not results: 
+            return f"I couldn't find any journal entries matching '{query}'."
+            
+        response_lines = [f"I found {len(results)} journal entries matching '{query}':"]
+        for i, item in enumerate(results):
+            line = f"{i+1}. **{item['title']}**"
+            if item.get('category'): line += f" [Category: {item['category']}]"
+            if item.get('content'): line += f": {item['content']}"
+            response_lines.append(line)
+        return "\n".join(response_lines)
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="search_journals",
+            entity_type="journal",
+            action_details={
+                "query": query,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return f"Failed to search journal entries: {error_msg}"
 
 # --- Memory Tools (from refactored code) ---
 
@@ -307,39 +954,273 @@ def _auto_categorize_memory(title, content):
     return "note"
 
 def add_memory(supabase, user_id, title=None, content=None, category=None):
-    if not title: return {"status": "error", "message": "A title for the memory is required."}
+    start_time = time.time()
     
-    # Auto-categorize if no category provided
-    if not category:
-        category = _auto_categorize_memory(title, content)
-    
-    database_personal.add_memory_entry(supabase, user_id, title, content, category)
-    return {"status": "ok", "message": f"I'll remember that: '{title}' (Category: {category})."}
+    try:
+        if not title:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="add_memory",
+                entity_type="memory",
+                action_details={"execution_time_ms": execution_time_ms},
+                success_status=False,
+                error_details="A title for the memory is required"
+            )
+            return {"status": "error", "message": "A title for the memory is required."}
+        
+        # Auto-categorize if no category provided
+        if not category:
+            category = _auto_categorize_memory(title, content)
+        
+        result = database_personal.add_memory_entry(supabase, user_id, title, content, category)
+        memory_id = result.get('id') if result else None
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="add_memory",
+            entity_type="memory",
+            entity_id=memory_id,
+            action_details={
+                "title": title,
+                "category": category,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        return {"status": "ok", "message": f"I'll remember that: '{title}' (Category: {category})."}
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="add_memory",
+            entity_type="memory",
+            action_details={
+                "title": title,
+                "category": category,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {"status": "error", "message": f"Failed to add memory: {error_msg}"}
 
 def update_memory(supabase, user_id, titleMatch=None, patch=None):
-    if not titleMatch or not patch: return {"status": "error", "message": "A title and data to update are required."}
-    memory = database_personal.find_memory_by_title(supabase, user_id, titleMatch)
-    if not memory: return {"status": "not_found", "message": f"I couldn't find a memory matching '{titleMatch}'."}
-    database_personal.update_memory_entry(supabase, user_id, memory['id'], patch)
-    return {"status": "ok", "message": f"I've updated the memory: '{memory['title']}'."}
+    start_time = time.time()
+    
+    try:
+        if not titleMatch or not patch:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="update_memory",
+                entity_type="memory",
+                action_details={"execution_time_ms": execution_time_ms},
+                success_status=False,
+                error_details="A title and data to update are required"
+            )
+            return {"status": "error", "message": "A title and data to update are required."}
+        
+        memory = database_personal.find_memory_by_title(supabase, user_id, titleMatch)
+        if not memory:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="update_memory",
+                entity_type="memory",
+                action_details={
+                    "titleMatch": titleMatch,
+                    "execution_time_ms": execution_time_ms
+                },
+                success_status=False,
+                error_details=f"Memory '{titleMatch}' not found"
+            )
+            return {"status": "not_found", "message": f"I couldn't find a memory matching '{titleMatch}'."}
+        
+        database_personal.update_memory_entry(supabase, user_id, memory['id'], patch)
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="update_memory",
+            entity_type="memory",
+            entity_id=memory['id'],
+            action_details={
+                "memory_title": memory['title'],
+                "titleMatch": titleMatch,
+                "patch": patch,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        return {"status": "ok", "message": f"I've updated the memory: '{memory['title']}'."}
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="update_memory",
+            entity_type="memory",
+            action_details={
+                "titleMatch": titleMatch,
+                "patch": patch,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {"status": "error", "message": f"Failed to update memory: {error_msg}"}
 
 def delete_memory(supabase, user_id, titleMatch=None):
-    if not titleMatch: return {"status": "error", "message": "Please tell me the title of the memory to delete."}
-    memory = database_personal.find_memory_by_title(supabase, user_id, titleMatch)
-    if not memory: return {"status": "not_found", "message": f"I couldn't find a memory matching '{titleMatch}'."}
-    database_personal.delete_memory_entry(supabase, user_id, memory['id'])
-    return {"status": "ok", "message": f"I have deleted the memory: '{memory['title']}'."}
+    start_time = time.time()
+    
+    try:
+        if not titleMatch:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="delete_memory",
+                entity_type="memory",
+                action_details={"execution_time_ms": execution_time_ms},
+                success_status=False,
+                error_details="Please tell me the title of the memory to delete"
+            )
+            return {"status": "error", "message": "Please tell me the title of the memory to delete."}
+        
+        memory = database_personal.find_memory_by_title(supabase, user_id, titleMatch)
+        if not memory:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="delete_memory",
+                entity_type="memory",
+                action_details={
+                    "titleMatch": titleMatch,
+                    "execution_time_ms": execution_time_ms
+                },
+                success_status=False,
+                error_details=f"Memory '{titleMatch}' not found"
+            )
+            return {"status": "not_found", "message": f"I couldn't find a memory matching '{titleMatch}'."}
+        
+        database_personal.delete_memory_entry(supabase, user_id, memory['id'])
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="delete_memory",
+            entity_type="memory",
+            entity_id=memory['id'],
+            action_details={
+                "memory_title": memory['title'],
+                "titleMatch": titleMatch,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        return {"status": "ok", "message": f"I have deleted the memory: '{memory['title']}'."}
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="delete_memory",
+            entity_type="memory",
+            action_details={
+                "titleMatch": titleMatch,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {"status": "error", "message": f"Failed to delete memory: {error_msg}"}
 
 def search_memories(supabase, user_id, query=None):
-    if not query: return "Please tell me what you want to search for."
-    results = database_personal.search_memory_entries(supabase, user_id, query)
-    if not results: return f"I couldn't find any memories matching '{query}'."
-    response_lines = [f"I found {len(results)} memories matching '{query}':"]
-    for i, item in enumerate(results):
-        line = f"{i+1}. **{item['title']}**"
-        if item.get('content'): line += f": {item['content']}"
-        response_lines.append(line)
-    return "\n".join(response_lines)
+    start_time = time.time()
+    
+    try:
+        if not query:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="search_memories",
+                entity_type="memory",
+                action_details={"execution_time_ms": execution_time_ms},
+                success_status=False,
+                error_details="Please tell me what you want to search for"
+            )
+            return "Please tell me what you want to search for."
+        
+        results = database_personal.search_memory_entries(supabase, user_id, query)
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="search_memories",
+            entity_type="memory",
+            action_details={
+                "query": query,
+                "results_count": len(results) if results else 0,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        if not results: 
+            return f"I couldn't find any memories matching '{query}'."
+            
+        response_lines = [f"I found {len(results)} memories matching '{query}':"]
+        for i, item in enumerate(results):
+            line = f"{i+1}. **{item['title']}**"
+            if item.get('content'): line += f": {item['content']}"
+            response_lines.append(line)
+        return "\n".join(response_lines)
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="search_memories",
+            entity_type="memory",
+            action_details={
+                "query": query,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return f"Failed to search memories: {error_msg}"
 
 
 # --- Scheduled Action Tools & Helpers (from refactored code) ---
@@ -385,52 +1266,282 @@ def _find_item_from_list(items: list, match_query: str, key: str):
     return None
 
 def schedule_ai_action(supabase, user_id, action_type=None, schedule=None, description=None, payload=None):
-    if not all([action_type, schedule, description]):
-        return {"status": "error", "message": "Action type, schedule, and description are required."}
+    start_time = time.time()
     
-    user_context = database_personal.get_user_context_for_ai(supabase, user_id)
-    limit = user_context.get('schedule_limit', 5)
-    if database_personal.count_active_ai_actions(supabase, user_id) >= limit:
-        return {"status": "limit_reached", "message": f"You have reached your plan's limit of {limit} AI Actions."}
+    try:
+        if not all([action_type, schedule, description]):
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="schedule_ai_action",
+                entity_type="ai_action",
+                action_details={"execution_time_ms": execution_time_ms},
+                success_status=False,
+                error_details="Action type, schedule, and description are required"
+            )
+            return {"status": "error", "message": "Action type, schedule, and description are required."}
+        
+        user_context = database_personal.get_user_context_for_ai(supabase, user_id)
+        limit = user_context.get('schedule_limit', 5)
+        if database_personal.count_active_ai_actions(supabase, user_id) >= limit:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="schedule_ai_action",
+                entity_type="ai_action",
+                action_details={
+                    "action_type_param": action_type,
+                    "description": description,
+                    "limit": limit,
+                    "execution_time_ms": execution_time_ms
+                },
+                success_status=False,
+                error_details=f"Schedule limit of {limit} AI Actions reached"
+            )
+            return {"status": "limit_reached", "message": f"You have reached your plan's limit of {limit} AI Actions."}
 
-    cron_schedule, error = _build_and_validate_schedule_spec(schedule)
-    if error: return {"status": "error", "message": error}
+        cron_schedule, error = _build_and_validate_schedule_spec(schedule)
+        if error:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="schedule_ai_action",
+                entity_type="ai_action",
+                action_details={
+                    "action_type_param": action_type,
+                    "description": description,
+                    "schedule": schedule,
+                    "execution_time_ms": execution_time_ms
+                },
+                success_status=False,
+                error_details=error
+            )
+            return {"status": "error", "message": error}
 
-    user_tz = pytz.timezone(user_context.get("timezone", "UTC"))
-    next_run_utc = croniter(cron_schedule, datetime.now(user_tz)).get_next(datetime).astimezone(pytz.utc)
-    
-    database_personal.add_ai_action(supabase, user_id, action_type, cron_schedule, next_run_utc.isoformat(), user_tz.zone, description, payload)
-    return {"status": "ok", "message": f"I've scheduled '{description}' for you."}
+        user_tz = pytz.timezone(user_context.get("timezone", "UTC"))
+        next_run_utc = croniter(cron_schedule, datetime.now(user_tz)).get_next(datetime).astimezone(pytz.utc)
+        
+        result = database_personal.add_ai_action(supabase, user_id, action_type, cron_schedule, next_run_utc.isoformat(), user_tz.zone, description, payload)
+        action_id = result.get('id') if result else None
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="schedule_ai_action",
+            entity_type="ai_action",
+            entity_id=action_id,
+            action_details={
+                "action_type_param": action_type,
+                "description": description,
+                "schedule": schedule,
+                "cron_schedule": cron_schedule,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        return {"status": "ok", "message": f"I've scheduled '{description}' for you."}
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="schedule_ai_action",
+            entity_type="ai_action",
+            action_details={
+                "action_type_param": action_type,
+                "description": description,
+                "schedule": schedule,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {"status": "error", "message": f"Failed to schedule AI action: {error_msg}"}
 
 def update_ai_action(supabase, user_id, descriptionMatch=None, patch=None):
-    if not descriptionMatch or not patch: return {"status": "error", "message": "A description and data to update are required."}
-
-    all_actions = database_personal.get_all_active_ai_actions(supabase, user_id)
-    action_to_update = _find_item_from_list(all_actions, descriptionMatch, key="description")
-
-    if not action_to_update: return {"status": "not_found", "message": f"I couldn't find an AI Action matching '{descriptionMatch}'."}
+    start_time = time.time()
     
-    if 'schedule' in patch:
-        new_schedule = patch.pop('schedule')
-        cron_schedule, error = _build_and_validate_schedule_spec(new_schedule)
-        if error: return {"status": "error", "message": error}
-        patch['schedule_spec'] = cron_schedule
-        user_context = database_personal.get_user_context_for_ai(supabase, user_id)
-        user_tz = pytz.timezone(user_context.get("timezone", "UTC"))
-        patch['next_run_at'] = croniter(cron_schedule, datetime.now(user_tz)).get_next(datetime).astimezone(pytz.utc).isoformat()
+    try:
+        if not descriptionMatch or not patch:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="update_ai_action",
+                entity_type="ai_action",
+                action_details={"execution_time_ms": execution_time_ms},
+                success_status=False,
+                error_details="A description and data to update are required"
+            )
+            return {"status": "error", "message": "A description and data to update are required."}
 
-    database_personal.update_ai_action_entry(supabase, user_id, action_to_update['id'], patch)
-    return {"status": "ok", "message": f"I've updated the AI Action: '{action_to_update['description']}'."}
+        all_actions = database_personal.get_all_active_ai_actions(supabase, user_id)
+        action_to_update = _find_item_from_list(all_actions, descriptionMatch, key="description")
+
+        if not action_to_update:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="update_ai_action",
+                entity_type="ai_action",
+                action_details={
+                    "descriptionMatch": descriptionMatch,
+                    "execution_time_ms": execution_time_ms
+                },
+                success_status=False,
+                error_details=f"AI Action '{descriptionMatch}' not found"
+            )
+            return {"status": "not_found", "message": f"I couldn't find an AI Action matching '{descriptionMatch}'."}
+        
+        # Handle schedule updates
+        if 'schedule' in patch:
+            new_schedule = patch.pop('schedule')
+            cron_schedule, error = _build_and_validate_schedule_spec(new_schedule)
+            if error:
+                execution_time_ms = int((time.time() - start_time) * 1000)
+                _log_action_with_timing(
+                    supabase=supabase,
+                    user_id=user_id,
+                    action_type="update_ai_action",
+                    entity_type="ai_action",
+                    entity_id=action_to_update['id'],
+                    action_details={
+                        "descriptionMatch": descriptionMatch,
+                        "new_schedule": new_schedule,
+                        "execution_time_ms": execution_time_ms
+                    },
+                    success_status=False,
+                    error_details=error
+                )
+                return {"status": "error", "message": error}
+            patch['schedule_spec'] = cron_schedule
+            user_context = database_personal.get_user_context_for_ai(supabase, user_id)
+            user_tz = pytz.timezone(user_context.get("timezone", "UTC"))
+            patch['next_run_at'] = croniter(cron_schedule, datetime.now(user_tz)).get_next(datetime).astimezone(pytz.utc).isoformat()
+
+        database_personal.update_ai_action_entry(supabase, user_id, action_to_update['id'], patch)
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="update_ai_action",
+            entity_type="ai_action",
+            entity_id=action_to_update['id'],
+            action_details={
+                "action_description": action_to_update['description'],
+                "descriptionMatch": descriptionMatch,
+                "patch": patch,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        return {"status": "ok", "message": f"I've updated the AI Action: '{action_to_update['description']}'."}
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="update_ai_action",
+            entity_type="ai_action",
+            action_details={
+                "descriptionMatch": descriptionMatch,
+                "patch": patch,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {"status": "error", "message": f"Failed to update AI action: {error_msg}"}
 
 def delete_ai_action(supabase, user_id, descriptionMatch=None):
-    if not descriptionMatch: return {"status": "error", "message": "Please provide the description of the AI Action to delete."}
-    all_actions = database_personal.get_all_active_ai_actions(supabase, user_id)
-    action_to_delete = _find_item_from_list(all_actions, descriptionMatch, key="description")
+    start_time = time.time()
     
-    if not action_to_delete: return {"status": "not_found", "message": f"I couldn't find an AI Action matching '{descriptionMatch}'."}
-    
-    database_personal.delete_ai_action_entry(supabase, user_id, action_to_delete['id'])
-    return {"status": "ok", "message": f"I have deleted the AI Action: '{action_to_delete['description']}'."}
+    try:
+        if not descriptionMatch:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="delete_ai_action",
+                entity_type="ai_action",
+                action_details={"execution_time_ms": execution_time_ms},
+                success_status=False,
+                error_details="Please provide the description of the AI Action to delete"
+            )
+            return {"status": "error", "message": "Please provide the description of the AI Action to delete."}
+        
+        all_actions = database_personal.get_all_active_ai_actions(supabase, user_id)
+        action_to_delete = _find_item_from_list(all_actions, descriptionMatch, key="description")
+        
+        if not action_to_delete:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="delete_ai_action",
+                entity_type="ai_action",
+                action_details={
+                    "descriptionMatch": descriptionMatch,
+                    "execution_time_ms": execution_time_ms
+                },
+                success_status=False,
+                error_details=f"AI Action '{descriptionMatch}' not found"
+            )
+            return {"status": "not_found", "message": f"I couldn't find an AI Action matching '{descriptionMatch}'."}
+        
+        database_personal.delete_ai_action_entry(supabase, user_id, action_to_delete['id'])
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="delete_ai_action",
+            entity_type="ai_action",
+            entity_id=action_to_delete['id'],
+            action_details={
+                "action_description": action_to_delete['description'],
+                "descriptionMatch": descriptionMatch,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        return {"status": "ok", "message": f"I have deleted the AI Action: '{action_to_delete['description']}'."}
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="delete_ai_action",
+            entity_type="ai_action",
+            action_details={
+                "descriptionMatch": descriptionMatch,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {"status": "error", "message": f"Failed to delete AI action: {error_msg}"}
 
 def _describe_cron_schedule(schedule_spec: str, user_tz_str: str = "UTC") -> str:
     if not schedule_spec: return "No schedule set"
