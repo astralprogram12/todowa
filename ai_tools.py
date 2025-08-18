@@ -124,46 +124,19 @@ def update_task(supabase, user_id, task_id=None, titleMatch=None, patch=None):
     return {"success": True, "updated": result.data}
 
 
-def complete_task(
-    supabase,
-    user_id=None,
-    task_ids=None,       # list of task IDs
-    title=None,
-    titleMatch=None,
-    **kwargs
-):
-    """
-    Mark one or multiple tasks as completed ("done").
-    Supports task_ids (list), exact title, or partial titleMatch.
-    """
-    if not task_ids and not title and not titleMatch:
-        return {"message": "No valid identifiers provided."}
+def complete_task(supabase, user_id=None, task_id=None, title=None, titleMatch=None, **kwargs):
+    title = title or titleMatch
+    if not task_id and not title:
+        return {"message": "No valid task_id(s) or title provided."}
 
-    query = supabase.table("tasks").update({"status": "done"}).eq("user_id", user_id)
+    query = supabase.table("tasks").update({"status": "completed"}).eq("user_id", user_id)
+    if task_id:
+        query = query.eq("id", task_id)
+    else:
+        query = query.eq("title", title)
+    result = query.execute()
 
-    updated = []
-
-    try:
-        if task_ids:
-            # Handle multiple IDs
-            result = query.in_("id", task_ids).execute()
-            updated.extend([t["id"] for t in result.data])
-        elif title:
-            # Exact title match
-            result = query.eq("title", title).execute()
-            updated.extend([t["id"] for t in result.data])
-        elif titleMatch:
-            # Partial title match (may update multiple tasks!)
-            result = query.ilike("title", f"%{titleMatch}%").execute()
-            updated.extend([t["id"] for t in result.data])
-
-        if not updated:
-            return {"message": "No tasks matched the criteria."}
-
-        return {"message": f"Marked {len(updated)} task(s) as done", "updated": updated}
-
-    except Exception as e:
-        return {"error": str(e)}
+    return {"message": f"Marked task {task_id or title} as completed"}
 
 
 def set_reminder(supabase, user_id, id=None, titleMatch=None, reminderTime=None):
@@ -220,10 +193,52 @@ def list_all_reminders(supabase, user_id):
 
 # --- Memory Tools (from refactored code) ---
 
-def add_memory(supabase, user_id, title=None, content=None):
+def _auto_categorize_memory(title, content):
+    """
+    Automatically categorizes a memory based on its title and content.
+    Returns a sensible category string like "preference", "note", "personal", etc.
+    """
+    # Default category for empty or None values
+    if not title and not content:
+        return "uncategorized"
+    
+    # Simple keyword-based categorization
+    title_lower = (title or "").lower()
+    content_lower = (content or "").lower()
+    text_to_analyze = f"{title_lower} {content_lower}"
+    
+    # Check for conversation history (special case)
+    if "conversation history" in title_lower:
+        return "conversation_history"
+    
+    # Preferences and settings
+    if any(word in text_to_analyze for word in ["prefer", "setting", "option", "like", "dislike", "favorite", "hate"]):
+        return "preference"
+    
+    # Personal information
+    if any(word in text_to_analyze for word in ["my", "i am", "i'm", "mine", "myself", "personal"]):
+        return "personal"
+    
+    # Contact information
+    if any(word in text_to_analyze for word in ["contact", "phone", "email", "address", "website"]):
+        return "contact"
+    
+    # Work-related
+    if any(word in text_to_analyze for word in ["work", "job", "office", "colleague", "project", "meeting"]):
+        return "work"
+    
+    # Fall back to "note" for anything else
+    return "note"
+
+def add_memory(supabase, user_id, title=None, content=None, category=None):
     if not title: return {"status": "error", "message": "A title for the memory is required."}
-    database_personal.add_memory_entry(supabase, user_id, title, content)
-    return {"status": "ok", "message": f"I'll remember that: '{title}'."}
+    
+    # Auto-categorize if no category provided
+    if not category:
+        category = _auto_categorize_memory(title, content)
+    
+    database_personal.add_memory_entry(supabase, user_id, title, content, category)
+    return {"status": "ok", "message": f"I'll remember that: '{title}' (Category: {category})."}
 
 def update_memory(supabase, user_id, titleMatch=None, patch=None):
     if not titleMatch or not patch: return {"status": "error", "message": "A title and data to update are required."}
@@ -395,8 +410,3 @@ AVAILABLE_TOOLS = {
     # AI Actions (Scheduled Actions)
     "schedule_ai_action": schedule_ai_action, "update_ai_action": update_ai_action, "delete_ai_action": delete_ai_action, "list_ai_actions": list_ai_actions,
 }
-
-
-
-
-

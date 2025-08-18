@@ -138,6 +138,12 @@ def webhook():
         # Add the AI's response to the history and trim to prevent excessive length
         history.append({"role": "assistant", "content": conversational_reply})
         CONVERSATION_HISTORIES[sender_phone] = history[-10:] # Keep last 5 user/assistant turns
+        
+        # Store conversation history in memory
+        try:
+            database_personal.store_conversation_history(supabase, user_id, history)
+        except Exception as e:
+            print(f"!!! ERROR STORING CONVERSATION HISTORY: {e}")
 
         # --- 4. Execute the AI's Action Plan ---
         final_reply = conversational_reply  # <-- keep this as the default
