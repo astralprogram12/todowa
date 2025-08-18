@@ -24,6 +24,11 @@
     { "type": "update_memory", "titleMatch": "string", "patch": { "title?": "string", "content?": "string" } },
     { "type": "delete_memory", "titleMatch": "string" },
 
+    { "type": "add_journal", "title": "string", "content": "string?", "category": "string?" },
+    { "type": "search_journals", "query": "string" },
+    { "type": "update_journal", "titleMatch": "string", "patch": { "title?": "string", "content?": "string", "category?": "string" } },
+    { "type": "delete_journal", "titleMatch": "string" },
+
     { "type": "schedule_ai_action",
       "action_type": ["summarize_tasks", "create_recurring_task"],
       "description": "string",

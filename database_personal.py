@@ -74,9 +74,9 @@ def get_task_context_for_ai(supabase: Client, user_id: str) -> dict:
         return {"tasks": []}
 
 def get_memory_context_for_ai(supabase: Client, user_id: str) -> dict:
-    """Fetches recent memories for a user."""
+    """Fetches recent memories for a user, excluding conversation history."""
     try:
-        res = supabase.table('memory_entries').select('title, content, created_at').eq('user_id', user_id).order('created_at', desc=True).limit(25).execute()
+        res = supabase.table('memory_entries').select('title, content, category, created_at').eq('user_id', user_id).neq('category', 'conversation_history').order('created_at', desc=True).limit(25).execute()
         return {"memories": res.data or []}
     except Exception as e:
         print(f"!!! DATABASE ERROR in get_memory_context_for_ai: {e}")
@@ -122,8 +122,8 @@ def find_memory_by_title(supabase: Client, user_id: str, title_query: str):
         return None
     
     
-def add_memory_entry(supabase: Client, user_id: str, title: str, content: str | None = None):
-    entry = {"user_id": user_id, "title": title, "content": content}
+def add_memory_entry(supabase: Client, user_id: str, title: str, content: str | None = None, category: str | None = None):
+    entry = {"user_id": user_id, "title": title, "content": content, "category": category}
     res = supabase.table("memory_entries").insert(entry).execute()
     if getattr(res, "error", None): raise Exception(str(res.error))
     return (res.data or [None])[0]
@@ -223,4 +223,111 @@ def find_ai_action_by_description(supabase: Client, user_id: str, description_qu
     except Exception as e:
         print(f"!!! DATABASE ERROR in find_ai_action_by_description: {e}")
         return None
+
+# --- Journal Functions ---
+
+def find_journal_by_title(supabase: Client, user_id: str, title_query: str):
+    """Finds a single journal entry using a title search."""
+    try:
+        res = supabase.table("journals").select("*").eq("user_id", user_id).ilike("title", f"%{title_query}%").limit(1).execute()
+        return res.data[0] if res.data else None
+    except Exception as e:
+        print(f"!!! DATABASE ERROR in find_journal_by_title: {e}")
+        return None
+
+def add_journal_entry(supabase: Client, user_id: str, title: str, content: str | None = None, category: str | None = None):
+    """Adds a new journal entry to the database."""
+    entry = {"user_id": user_id, "title": title, "content": content, "category": category}
+    res = supabase.table("journals").insert(entry).execute()
+    if getattr(res, "error", None): raise Exception(str(res.error))
+    return (res.data or [None])[0]
+
+def update_journal_entry(supabase: Client, user_id: str, journal_id: str, patch: dict):
+    """Updates an existing journal entry."""
+    res = supabase.table("journals").update(patch).eq("id", journal_id).eq("user_id", user_id).execute()
+    if getattr(res, "error", None): raise Exception(str(res.error))
+    return (res.data or [None])[0]
+
+def delete_journal_entry(supabase: Client, user_id: str, journal_id: str):
+    """Deletes a journal entry from the database."""
+    supabase.table("journals").delete().eq("id", journal_id).eq("user_id", user_id).execute()
+
+def search_journal_entries(supabase: Client, user_id: str, query: str, limit: int = 5):
+    """Searches journal entries by title and content."""
+    try:
+        res = supabase.table("journals").select("title, content, category, created_at") \
+            .eq("user_id", user_id).or_(f"title.ilike.%{query}%,content.ilike.%{query}%") \
+            .order("created_at", desc=True).limit(limit).execute()
+        return res.data or []
+    except Exception as e:
+        print(f"!!! DATABASE ERROR in search_journal_entries: {e}")
+        return []
+
+def get_journal_context_for_ai(supabase: Client, user_id: str) -> dict:
+    """Fetches recent journal entries for context."""
+    try:
+        res = supabase.table('journals').select('title, content, category, created_at').eq('user_id', user_id).order('created_at', desc=True).limit(10).execute()
+        return {"journals": res.data or []}
+    except Exception as e:
+        print(f"!!! DATABASE ERROR in get_journal_context_for_ai: {e}")
+        return {"journals": []}
+
+# --- Conversation History Functions ---
+
+def store_conversation_history(supabase: Client, user_id: str, history: list):
+    """Stores conversation history in memory_entries with special category."""
+    import json
+    try:
+        # Delete existing conversation history
+        supabase.table('memory_entries').delete().eq('user_id', user_id).eq('category', 'conversation_history').execute()
+        
+        # Limit to last 10 messages or 5 complete conversations
+        limited_history = _limit_conversation_history(history)
+        
+        # Store new conversation history
+        if limited_history:
+            conversation_content = json.dumps(limited_history)
+            add_memory_entry(supabase, user_id, 
+                           title="Recent Conversation History", 
+                           content=conversation_content, 
+                           category="conversation_history")
+    except Exception as e:
+        print(f"!!! DATABASE ERROR in store_conversation_history: {e}")
+
+def get_conversation_history(supabase: Client, user_id: str) -> list:
+    """Retrieves conversation history from memory_entries."""
+    import json
+    try:
+        res = supabase.table('memory_entries').select('content').eq('user_id', user_id).eq('category', 'conversation_history').limit(1).execute()
+        if res.data and res.data[0].get('content'):
+            return json.loads(res.data[0]['content'])
+        return []
+    except Exception as e:
+        print(f"!!! DATABASE ERROR in get_conversation_history: {e}")
+        return []
+
+def _limit_conversation_history(history: list, max_messages: int = 10, max_conversations: int = 5) -> list:
+    """Limits conversation history to max_messages or max_conversations."""
+    if not history:
+        return []
+    
+    # First limit by number of messages
+    limited_by_messages = history[-max_messages:] if len(history) > max_messages else history
+    
+    # Then limit by number of complete conversations (user-assistant pairs)
+    conversation_count = 0
+    result = []
+    
+    # Count backwards to keep most recent conversations
+    for i in range(len(limited_by_messages) - 1, -1, -1):
+        msg = limited_by_messages[i]
+        result.insert(0, msg)
+        
+        # Count user messages as conversation starts
+        if msg.get('role') == 'user':
+            conversation_count += 1
+            if conversation_count >= max_conversations:
+                break
+    
+    return result
 

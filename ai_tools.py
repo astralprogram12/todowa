@@ -191,6 +191,82 @@ def list_all_reminders(supabase, user_id):
     return "\n".join(response_lines)
 
 
+# --- Journal Tools ---
+
+def _auto_categorize_journal(title, content):
+    """Automatically categorizes a journal entry based on its title and content."""
+    # Default category for empty or None values
+    if not title and not content:
+        return "uncategorized"
+    
+    # Simple keyword-based categorization
+    title_lower = (title or "").lower()
+    content_lower = (content or "").lower()
+    text_to_analyze = f"{title_lower} {content_lower}"
+    
+    # Meeting notes
+    if any(word in text_to_analyze for word in ["meeting", "conference", "discussion", "session", "workshop", "webinar"]):
+        return "meeting_notes"
+    
+    # Ideas and brainstorming
+    if any(word in text_to_analyze for word in ["idea", "concept", "brainstorm", "thought", "inspiration", "innovation"]):
+        return "ideas"
+    
+    # Research and learning
+    if any(word in text_to_analyze for word in ["research", "study", "learn", "discover", "fact", "trivia", "knowledge"]):
+        return "research"
+    
+    # Plans and goals
+    if any(word in text_to_analyze for word in ["plan", "goal", "objective", "strategy", "roadmap", "milestone"]):
+        return "planning"
+    
+    # References and resources
+    if any(word in text_to_analyze for word in ["reference", "resource", "link", "book", "article", "video"]):
+        return "reference"
+    
+    # Fall back to "general" for anything else
+    return "general"
+
+def add_journal(supabase, user_id, title=None, content=None, category=None):
+    """Adds a journal entry to the database, with automatic categorization."""
+    if not title: return {"status": "error", "message": "A title for the journal entry is required."}
+    
+    # Auto-categorize if no category provided
+    if not category:
+        category = _auto_categorize_journal(title, content)
+    
+    database_personal.add_journal_entry(supabase, user_id, title, content, category)
+    return {"status": "ok", "message": f"I've added a journal entry: '{title}' (Category: {category})."}
+
+def update_journal(supabase, user_id, titleMatch=None, patch=None):
+    """Updates an existing journal entry."""
+    if not titleMatch or not patch: return {"status": "error", "message": "A title and data to update are required."}
+    journal = database_personal.find_journal_by_title(supabase, user_id, titleMatch)
+    if not journal: return {"status": "not_found", "message": f"I couldn't find a journal entry matching '{titleMatch}'."}
+    database_personal.update_journal_entry(supabase, user_id, journal['id'], patch)
+    return {"status": "ok", "message": f"I've updated the journal entry: '{journal['title']}'."}
+
+def delete_journal(supabase, user_id, titleMatch=None):
+    """Deletes a journal entry from the database."""
+    if not titleMatch: return {"status": "error", "message": "Please tell me the title of the journal entry to delete."}
+    journal = database_personal.find_journal_by_title(supabase, user_id, titleMatch)
+    if not journal: return {"status": "not_found", "message": f"I couldn't find a journal entry matching '{titleMatch}'."}
+    database_personal.delete_journal_entry(supabase, user_id, journal['id'])
+    return {"status": "ok", "message": f"I have deleted the journal entry: '{journal['title']}'."}
+
+def search_journals(supabase, user_id, query=None):
+    """Searches for journal entries by title or content."""
+    if not query: return "Please tell me what you want to search for."
+    results = database_personal.search_journal_entries(supabase, user_id, query)
+    if not results: return f"I couldn't find any journal entries matching '{query}'."
+    response_lines = [f"I found {len(results)} journal entries matching '{query}':"]
+    for i, item in enumerate(results):
+        line = f"{i+1}. **{item['title']}**"
+        if item.get('category'): line += f" [Category: {item['category']}]"
+        if item.get('content'): line += f": {item['content']}"
+        response_lines.append(line)
+    return "\n".join(response_lines)
+
 # --- Memory Tools (from refactored code) ---
 
 def _auto_categorize_memory(title, content):
@@ -407,6 +483,12 @@ AVAILABLE_TOOLS = {
     "set_reminder": set_reminder, "update_reminder": update_reminder, "delete_reminder": delete_reminder, "list_all_reminders": list_all_reminders,
     # Memories
     "add_memory": add_memory, "update_memory": update_memory, "delete_memory": delete_memory, "search_memories": search_memories,
+    # Journals
+    "add_journal": add_journal, "update_journal": update_journal, "delete_journal": delete_journal, "search_journals": search_journals,
     # AI Actions (Scheduled Actions)
     "schedule_ai_action": schedule_ai_action, "update_ai_action": update_ai_action, "delete_ai_action": delete_ai_action, "list_ai_actions": list_ai_actions,
 }
+
+
+
+

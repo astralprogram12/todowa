@@ -75,9 +75,9 @@ def get_task_context_for_ai(supabase: Client, user_id: str) -> dict:
         return {"tasks": []}
 
 def get_memory_context_for_ai(supabase: Client, user_id: str) -> dict:
-    """Fetches recent memories for a user."""
+    """Fetches recent memories for a user, excluding conversation history."""
     try:
-        res = supabase.table('memory_entries').select('title, content, created_at').eq('user_id', user_id).order('created_at', desc=True).limit(25).execute()
+        res = supabase.table('memory_entries').select('title, content, category, created_at').eq('user_id', user_id).neq('category', 'conversation_history').order('created_at', desc=True).limit(25).execute()
         return {"memories": res.data or []}
     except Exception as e:
         print(f"!!! DATABASE ERROR in get_memory_context_for_ai: {e}")
@@ -123,8 +123,10 @@ def find_memory_by_title(supabase: Client, user_id: str, title_query: str):
         return None
     
     
-def add_memory_entry(supabase: Client, user_id: str, title: str, content: str | None = None):
+def add_memory_entry(supabase: Client, user_id: str, title: str, content: str | None = None, category: str | None = None):
     entry = {"user_id": user_id, "title": title, "content": content}
+    if category:
+        entry["category"] = category
     res = supabase.table("memory_entries").insert(entry).execute()
     if getattr(res, "error", None): raise Exception(str(res.error))
     return (res.data or [None])[0]
@@ -146,6 +148,65 @@ def search_memory_entries(supabase: Client, user_id: str, query: str, limit: int
     except Exception as e:
         print(f"!!! DATABASE ERROR in search_memory_entries: {e}")
         return []
+
+# --- Conversation History Functions ---
+
+def store_conversation_history(supabase: Client, user_id: str, history: list):
+    """Stores conversation history in memory_entries with special category."""
+    import json
+    try:
+        # Delete existing conversation history
+        supabase.table('memory_entries').delete().eq('user_id', user_id).eq('category', 'conversation_history').execute()
+        
+        # Limit to last 10 messages or 5 complete conversations
+        limited_history = _limit_conversation_history(history)
+        
+        # Store new conversation history
+        if limited_history:
+            conversation_content = json.dumps(limited_history)
+            add_memory_entry(supabase, user_id, 
+                           title="Recent Conversation History", 
+                           content=conversation_content, 
+                           category="conversation_history")
+    except Exception as e:
+        print(f"!!! DATABASE ERROR in store_conversation_history: {e}")
+
+def get_conversation_history(supabase: Client, user_id: str) -> list:
+    """Retrieves conversation history from memory_entries."""
+    import json
+    try:
+        res = supabase.table('memory_entries').select('content').eq('user_id', user_id).eq('category', 'conversation_history').limit(1).execute()
+        if res.data and res.data[0].get('content'):
+            return json.loads(res.data[0]['content'])
+        return []
+    except Exception as e:
+        print(f"!!! DATABASE ERROR in get_conversation_history: {e}")
+        return []
+
+def _limit_conversation_history(history: list, max_messages: int = 10, max_conversations: int = 5) -> list:
+    """Limits conversation history to max_messages or max_conversations."""
+    if not history:
+        return []
+    
+    # First limit by number of messages
+    limited_by_messages = history[-max_messages:] if len(history) > max_messages else history
+    
+    # Then limit by number of complete conversations (user-assistant pairs)
+    conversation_count = 0
+    result = []
+    
+    # Count backwards to keep most recent conversations
+    for i in range(len(limited_by_messages) - 1, -1, -1):
+        msg = limited_by_messages[i]
+        result.insert(0, msg)
+        
+        # Count user messages as conversation starts
+        if msg.get('role') == 'user':
+            conversation_count += 1
+            if conversation_count >= max_conversations:
+                break
+    
+    return result
 
 # --- Scheduled Action Functions ---
 def get_all_reminders(supabase: Client, user_id: str) -> list:
