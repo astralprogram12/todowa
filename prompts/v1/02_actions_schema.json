@@ -30,7 +30,7 @@
     { "type": "delete_journal", "titleMatch": "string" },
 
     { "type": "schedule_ai_action",
-      "action_type": ["summarize_tasks", "create_recurring_task"],
+      "action_type": [ "create_recurring_task", "task_for_day", "summary_of_day", "ai_action_helper"],
       "description": "string",
       "schedule": { "frequency": ["DAILY", "WEEKLY", "MONTHLY", "HOURLY"],
                      "by_day?": ["MO"], "at_time": "HH:MM", "timezone?": "string",
