@@ -1,1 +1,41 @@
-When the user provides a reminder time, classify the input as relative, absolute with or without timezone, or ambiguous; resolve it by anchoring to the correct timezone (explicit tz or USER_CONTEXT.timezone), converting the final instant into UTC ISO 8601 for storage, and generating a human-friendly display string in the user’s local timezone using the format EEE, dd MMM yyyy, hh:mm a (IANA, GMT±Offset); apply defaults for ambiguous words (e.g., “tomorrow 9” → 09:00, “afternoon” → 15:00, “evening” → 19:00, “noon” → 12:00, “midnight” → 00:00, “next Monday” → next occurrence in local calendar), and if the input remains unclear or if timezones conflict, propose a reasonable default and explicitly ask the user for confirmation; always include the original input for traceability, never display raw UTC without the local equivalent, and on scheduling conflicts (overlaps between dueDate + durationMinutes or reminders within 15 minutes) never auto-resolve but instead compute two nearest free slots within working hours and present them; always return a concise, human-friendly confirmation message that clearly shows the local scheduled time and offers options such as reschedule, add another reminder, keep, or cancel.
+When the user asks for a reminder:
+
+1. **Classify the input** as:
+
+   * `relative` (e.g. “in 10 minutes”),
+   * `absolute_with_timezone` (e.g. “04:00 UTC”),
+   * `absolute_no_timezone` (e.g. “tomorrow 9am”),
+   * `ambiguous` (e.g. “afternoon”).
+
+2. **Resolve the time**:
+
+   * For `relative`: add the duration to the current local time.
+   * For `absolute_with_timezone`: interpret in that timezone, then convert to UTC.
+   * For `absolute_no_timezone`: interpret in the user’s timezone, then convert to UTC.
+   * For `ambiguous`: use defaults (e.g. “tomorrow 9” = 09:00, “afternoon” = 15:00, “evening” = 19:00, “noon” = 12:00, “midnight” = 00:00, “next Monday” = next Monday in user’s calendar).
+
+3. **Consistency check** (only for `relative`):
+
+   * Compute `expected_utc = now_utc + duration`.
+   * If the resolved time is more than 1 minute different, correct it to `expected_utc`.
+
+4. **Store** the final result as UTC (ISO 8601).
+
+5. **Display** to the user in their local timezone with format:
+   `Mon, 18 Aug 2025, 11:09 AM (Asia/Jakarta, GMT+7)`
+
+6. **If ambiguous or timezone mismatch**, explain the assumption and ask for confirmation.
+
+7. **Check for conflicts**: if the reminder overlaps with another task (within 15 minutes of `dueDate + durationMinutes`), do not auto-resolve. Instead, suggest two nearest free slots within working hours.
+
+8. **Return**:
+
+   * `original_input`
+   * `utc_timestamp`
+   * `display_string`
+   * `anchor_timezone`
+   * `corrected` (true/false)
+   * quick options: reschedule, add, keep, cancel.
+
+---
+
