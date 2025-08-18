@@ -1,11 +1,11 @@
 {
   "actions": [
-    { "type": "add_task", "title": "string", "notes?": "string", "dueDate?": "YYYY-MM-DDTHH:MM:SSZ",
+    { "type": "add_task", "title": "string", "notes?": "string", "due_date?": "YYYY-MM-DDTHH:MM:SSZ",
       "priority?": "low|medium|high", "category?": "string", "tags?": ["string"],
       "url?": "string", "difficulty?": "easy|medium|hard" },
 
     { "type": "update_task", "titleMatch": "string", "idMatch?": "string", "patch": {
-      "title?": "string", "notes?": "string", "dueDate?": "YYYY-MM-DDTHH:MM:SSZ",
+      "title?": "string", "notes?": "string", "due_date?": "YYYY-MM-DDTHH:MM:SSZ",
       "priority?": "low|medium|high", "category?": "string", "tags?": ["string"],
       "estimateMinutes?": 0, "durationMinutes?": 0, "assignees?": ["string"],
       "url?": "string", "difficulty?": "easy|medium|hard"
