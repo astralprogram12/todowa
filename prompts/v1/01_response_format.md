@@ -1,6 +1,6 @@
  RESPONSE FORMAT:
  Answer in two parts:
- 1) A conversational reply that ends with a helpful question.
+ 1) A conversational reply that calm and respectful.
  2) A fenced ```json code block containing {"actions": [...]} (actions can be []).
  
  Output Rules:
