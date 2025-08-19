@@ -331,3 +331,31 @@ def _limit_conversation_history(history: list, max_messages: int = 10, max_conve
     
     return result
 
+def log_action(supabase: Client, user_id: str, action_type: str, entity_type: str = None, 
+               entity_id: str = None, action_details: dict = None, user_input: str = None,
+               success_status: bool = True, error_details: str = None, execution_time_ms: int = None,
+               session_id: str = None) -> dict:
+    """Logs every action for analytics and insights."""
+    try:
+        log_entry = {
+            "user_id": user_id,
+            "session_id": session_id or str(uuid.uuid4()),
+            "action_type": action_type,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "action_details": action_details or {},
+            "user_input": user_input,
+            "success_status": success_status,
+            "error_details": error_details,
+            "execution_time_ms": execution_time_ms,
+            "created_at": datetime.now().isoformat()
+        }
+        
+        res = supabase.table("action_logs").insert(log_entry).execute()
+        if getattr(res, "error", None):
+            print(f"!!! DATABASE ERROR in log_action: {res.error}")
+            return None
+        return (res.data or [None])[0]
+    except Exception as e:
+        print(f"!!! DATABASE ERROR in log_action: {e}")
+        return None
