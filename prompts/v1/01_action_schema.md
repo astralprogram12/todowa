@@ -50,11 +50,19 @@
 
 ## Reminder Management
 ```json
-// Reminders always tie to tasks
+// Reminders always tie to tasks - MUST ensure task exists first!
+// If no matching task exists, use add_task action first, then set_reminder
+
 { "type": "set_reminder", "titleMatch": "string", "reminderTime": "YYYY-MM-DDTHH:MM:SSZ" }
 { "type": "update_reminder", "titleMatch": "string", "newReminderTime": "YYYY-MM-DDTHH:MM:SSZ" }
 { "type": "delete_reminder", "titleMatch": "string" }
 { "type": "snooze_reminder", "titleMatch": "string", "newReminderTime": "YYYY-MM-DDTHH:MM:SSZ" }
+
+// CRITICAL: Always validate task exists before setting reminder!
+// Common pattern for new reminders:
+// 1. Check if task with titleMatch exists
+// 2. If not found: add_task first
+// 3. Then: set_reminder with exact same titleMatch
 ```
 
 ## Knowledge Management

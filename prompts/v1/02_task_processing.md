@@ -60,14 +60,18 @@ For every auto-enhancement, include:
 
 ## Reminder Logic
 
-**Core Rule:** Reminders always tie to tasks. If no matching task exists, create one first.
+**MANDATORY Core Rule:** Reminders always tie to tasks. If no matching task exists, you MUST create the task first.
 
 **Processing Sequence:**
-1. **Parse Input:** Identify if setting reminder for existing task or need to create new task
-2. **Task Creation:** If no matching task found, create task then set reminder
-3. **Time Processing:** Convert time to UTC using timezone rules
-4. **Conflict Check:** Verify no overlapping reminders within 15 minutes
-5. **Confirmation:** Display in user's timezone with options
+1. **Parse Input:** Extract task title and reminder time from user request
+2. **Task Validation:** Check if task with exact or similar title exists
+3. **Task Creation (Required):** If no matching task found, MUST use `add_task` action first
+4. **Reminder Setting:** After task exists, use `set_reminder` action with exact titleMatch
+5. **Time Processing:** Convert time to UTC using timezone rules
+6. **Conflict Check:** Verify no overlapping reminders within 15 minutes
+7. **Confirmation:** Display in user's timezone with options
+
+**NEVER use `set_reminder` without ensuring the task exists first!**
 
 **Example Flows:**
 
@@ -75,18 +79,37 @@ For every auto-enhancement, include:
 ```
 User: "Remind me about the meeting at 9am"
 System: 
-1. Find task matching "meeting"
-2. Set reminder for 9am tomorrow (converted to UTC)
+1. Find task matching "meeting" (exists)
+2. Use: set_reminder action with exact titleMatch
 3. Confirm: "Reminder set for 'Team Meeting' at 9:00 AM tomorrow (GMT+7)"
+Actions: [{"type": "set_reminder", "titleMatch": "Team Meeting", "reminderTime": "..."}]
 ```
 
-*Scenario 2: Reminder without existing task*
+*Scenario 2: Reminder without existing task (MOST COMMON)*
 ```
-User: "Remind me to call John at 3pm"
+User: "Remind me to take a bath in 5 minutes"
 System:
-1. Create task: "Call John"
-2. Set reminder for 3pm today (converted to UTC)
-3. Confirm: "Added task 'Call John' with reminder at 3:00 PM today (GMT+7)"
+1. Check for task matching "take a bath" (NOT FOUND)
+2. MUST create task first: add_task action
+3. Then set reminder: set_reminder action
+4. Confirm: "Added task 'Take a bath' with reminder in 5 minutes"
+Actions: [
+  {"type": "add_task", "title": "Take a bath"},
+  {"type": "set_reminder", "titleMatch": "Take a bath", "reminderTime": "..."}
+]
+```
+
+**CRITICAL ERROR EXAMPLE (DO NOT DO):**
+```
+❌ WRONG:
+Actions: [{"type": "set_reminder", "titleMatch": "take a bath", "reminderTime": "..."}]
+// This will fail if no task named "take a bath" exists!
+
+✅ CORRECT:
+Actions: [
+  {"type": "add_task", "title": "Take a bath"},
+  {"type": "set_reminder", "titleMatch": "Take a bath", "reminderTime": "..."}
+]
 ```
 
 ## Conflict Resolution
