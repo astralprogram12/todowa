@@ -1,8 +1,8 @@
 # database_personal.py (Correct, Final, and Verified Version)
 from supabase import Client
-from datetime import date
-from config import UNVERIFIED_LIMIT, VERIFIED_LIMIT
+from datetime import date, datetime
 import uuid
+from config import UNVERIFIED_LIMIT, VERIFIED_LIMIT
 
 # --- User and Usage Functions ---
 
