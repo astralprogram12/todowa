@@ -50,15 +50,71 @@ def check_and_update_usage(supabase: Client, sender_phone: str, user_id: str | N
 # --- AI Context Functions ---
 
 def get_user_context_for_ai(supabase: Client, user_id: str) -> dict:
-    """Fetches user-specific context: timezone and schedule limit."""
+    """Fetches user-specific context: timezone, schedule limit, and silent mode status."""
     try:
-        res = supabase.table('user_whatsapp').select('timezone, schedule_limit').eq('user_id', user_id).execute()
+        res = supabase.table('user_whatsapp').select(
+            'timezone, schedule_limit, auto_silent_enabled, auto_silent_start_hour, auto_silent_end_hour'
+        ).eq('user_id', user_id).execute()
+        
+        context = {
+            "timezone": "UTC", 
+            "schedule_limit": 5,
+            "auto_silent_enabled": True,
+            "auto_silent_start_hour": 7,
+            "auto_silent_end_hour": 11
+        }
+        
         if res.data:
-            return res.data[0]
-        return {"timezone": "UTC", "schedule_limit": 5} # Safe defaults
+            user_data = res.data[0]
+            context.update({
+                "timezone": user_data.get('timezone', 'UTC'),
+                "schedule_limit": user_data.get('schedule_limit', 5),
+                "auto_silent_enabled": user_data.get('auto_silent_enabled', True),
+                "auto_silent_start_hour": user_data.get('auto_silent_start_hour', 7),
+                "auto_silent_end_hour": user_data.get('auto_silent_end_hour', 11)
+            })
+        
+        # Add silent mode status
+        try:
+            from database_silent import get_active_silent_session
+            active_session = get_active_silent_session(supabase, user_id)
+            
+            if active_session:
+                from datetime import datetime, timezone, timedelta
+                start_time = datetime.fromisoformat(active_session['start_time'].replace('Z', '+00:00'))
+                end_time = start_time + timedelta(minutes=active_session['duration_minutes'])
+                remaining = end_time - datetime.now(timezone.utc)
+                
+                context['silent_context'] = {
+                    'is_active': True,
+                    'session_id': active_session['id'],
+                    'start_time': active_session['start_time'],
+                    'duration_minutes': active_session['duration_minutes'],
+                    'trigger_type': active_session['trigger_type'],
+                    'action_count': active_session['action_count'],
+                    'remaining_minutes': max(0, int(remaining.total_seconds() / 60))
+                }
+            else:
+                context['silent_context'] = {
+                    'is_active': False
+                }
+                
+        except Exception as silent_err:
+            print(f"!!! ERROR fetching silent context: {silent_err}")
+            context['silent_context'] = {'is_active': False}
+        
+        return context
+        
     except Exception as e:
         print(f"!!! DATABASE ERROR in get_user_context_for_ai: {e}")
-        return {"timezone": "UTC", "schedule_limit": 5}
+        return {
+            "timezone": "UTC", 
+            "schedule_limit": 5,
+            "auto_silent_enabled": True,
+            "auto_silent_start_hour": 7,
+            "auto_silent_end_hour": 11,
+            "silent_context": {"is_active": False}
+        }
 
 
 

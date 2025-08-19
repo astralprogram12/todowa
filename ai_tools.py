@@ -8,6 +8,7 @@ import time
 
 # Local imports (ensure these files exist and are correct)
 import database_personal
+import database_silent
 
 # --- Helper Functions ---
 
@@ -1824,6 +1825,336 @@ def ai_action_helper(supabase, user_id, **kwargs):
         
         return {"status": "error", "message": f"I had trouble providing assistance: {error_msg}"}
 
+# --- Silent Mode Tools ---
+
+def activate_silent_mode(supabase, user_id, **kwargs):
+    """Activates silent mode for a specified duration."""
+    start_time = time.time()
+    
+    try:
+        # Extract duration from kwargs - support multiple formats
+        duration_minutes = kwargs.get('duration_minutes') or kwargs.get('durationMinutes')
+        duration_hours = kwargs.get('duration_hours') or kwargs.get('durationHours')
+        trigger_type = kwargs.get('trigger_type', 'manual')
+        
+        # Convert hours to minutes if provided
+        if duration_hours and not duration_minutes:
+            duration_minutes = int(float(duration_hours) * 60)
+        
+        if not duration_minutes:
+            return {
+                "status": "error", 
+                "message": "Please specify the duration for silent mode (e.g., 'go silent for 2 hours' or 'don't reply for 60 minutes')"
+            }
+        
+        duration_minutes = int(duration_minutes)
+        
+        # Validate duration (max 12 hours)
+        if duration_minutes > 720:  # 12 hours
+            return {
+                "status": "error", 
+                "message": "Silent mode duration cannot exceed 12 hours. Please choose a shorter duration."
+            }
+        
+        if duration_minutes < 5:  # Minimum 5 minutes
+            return {
+                "status": "error", 
+                "message": "Silent mode duration must be at least 5 minutes."
+            }
+        
+        # Create silent session
+        session = database_silent.create_silent_session(supabase, user_id, duration_minutes, trigger_type)
+        
+        if not session:
+            return {
+                "status": "error", 
+                "message": "Failed to activate silent mode. Please try again."
+            }
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        
+        # Log successful activation
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="activate_silent_mode",
+            entity_type="silent_session",
+            entity_id=session['id'],
+            action_details={
+                "duration_minutes": duration_minutes,
+                "trigger_type": trigger_type,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        # Calculate end time for display
+        from datetime import datetime, timezone, timedelta
+        end_time = datetime.now(timezone.utc) + timedelta(minutes=duration_minutes)
+        
+        # Format duration for display
+        if duration_minutes >= 60:
+            hours = duration_minutes // 60
+            remaining_mins = duration_minutes % 60
+            if remaining_mins > 0:
+                duration_text = f"{hours} hour{'s' if hours > 1 else ''} and {remaining_mins} minute{'s' if remaining_mins > 1 else ''}"
+            else:
+                duration_text = f"{hours} hour{'s' if hours > 1 else ''}"
+        else:
+            duration_text = f"{duration_minutes} minute{'s' if duration_minutes > 1 else ''}"
+        
+        return {
+            "status": "ok",
+            "message": f"🔇 **Silent mode activated** for {duration_text}\n\nI'll continue processing your requests but won't send replies until {end_time.strftime('%H:%M UTC')}. I'll send you a summary of all actions taken when silent mode ends.\n\n💡 **To exit early:** Say 'exit silent mode' or 'end silent mode'",
+            "silent_session_id": session['id'],
+            "end_time": end_time.isoformat()
+        }
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="activate_silent_mode",
+            entity_type="silent_session",
+            action_details={"execution_time_ms": execution_time_ms},
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {"status": "error", "message": f"Failed to activate silent mode: {error_msg}"}
+
+def deactivate_silent_mode(supabase, user_id, **kwargs):
+    """Deactivates silent mode and returns accumulated actions summary."""
+    start_time = time.time()
+    
+    try:
+        # Get active silent session
+        active_session = database_silent.get_active_silent_session(supabase, user_id)
+        
+        if not active_session:
+            return {
+                "status": "info",
+                "message": "🔊 You're not currently in silent mode."
+            }
+        
+        # End the session
+        session_data = database_silent.end_silent_session(supabase, active_session['id'], 'manual_exit')
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        
+        # Log deactivation
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="deactivate_silent_mode",
+            entity_type="silent_session",
+            entity_id=active_session['id'],
+            action_details={
+                "session_duration_minutes": active_session['duration_minutes'],
+                "actions_accumulated": active_session['action_count'],
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        # Generate summary
+        summary = generate_silent_mode_summary(session_data)
+        
+        return {
+            "status": "ok",
+            "message": f"🔊 **Silent mode ended**\n\n{summary}",
+            "accumulated_actions": session_data['accumulated_actions'],
+            "action_count": session_data['action_count']
+        }
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="deactivate_silent_mode",
+            entity_type="silent_session",
+            action_details={"execution_time_ms": execution_time_ms},
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {"status": "error", "message": f"Failed to deactivate silent mode: {error_msg}"}
+
+def get_silent_status(supabase, user_id, **kwargs):
+    """Gets the current silent mode status for a user."""
+    start_time = time.time()
+    
+    try:
+        active_session = database_silent.get_active_silent_session(supabase, user_id)
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        
+        if not active_session:
+            return {
+                "status": "ok",
+                "message": "🔊 Silent mode is currently **off**",
+                "is_silent": False
+            }
+        
+        # Calculate remaining time
+        from datetime import datetime, timezone, timedelta
+        start_time_dt = datetime.fromisoformat(active_session['start_time'].replace('Z', '+00:00'))
+        end_time = start_time_dt + timedelta(minutes=active_session['duration_minutes'])
+        remaining = end_time - datetime.now(timezone.utc)
+        
+        if remaining.total_seconds() <= 0:
+            # Session expired
+            return {
+                "status": "ok", 
+                "message": "🔊 Silent mode is currently **off**",
+                "is_silent": False
+            }
+        
+        remaining_minutes = int(remaining.total_seconds() / 60)
+        
+        # Format remaining time
+        if remaining_minutes >= 60:
+            hours = remaining_minutes // 60
+            mins = remaining_minutes % 60
+            if mins > 0:
+                time_text = f"{hours}h {mins}m"
+            else:
+                time_text = f"{hours}h"
+        else:
+            time_text = f"{remaining_minutes}m"
+        
+        return {
+            "status": "ok",
+            "message": f"🔇 Silent mode is **active**\n\n⏱️ **Remaining:** {time_text}\n📊 **Actions accumulated:** {active_session['action_count']}\n🚪 **To exit:** Say 'exit silent mode'",
+            "is_silent": True,
+            "remaining_minutes": remaining_minutes,
+            "action_count": active_session['action_count'],
+            "session_id": active_session['id']
+        }
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        return {"status": "error", "message": f"Failed to check silent status: {error_msg}"}
+
+def generate_silent_mode_summary(session_data):
+    """Generates a human-readable summary of actions taken during silent mode."""
+    try:
+        if not session_data or not session_data.get('accumulated_actions'):
+            return "📊 **Silent Mode Summary**\n\nNo actions were taken during this silent period."
+        
+        actions = session_data['accumulated_actions']
+        total_actions = len(actions)
+        
+        # Categorize actions
+        action_types = {}
+        for action in actions:
+            action_type = action.get('action_type', 'unknown')
+            action_types[action_type] = action_types.get(action_type, 0) + 1
+        
+        # Calculate duration
+        duration_minutes = session_data.get('duration_minutes', 0)
+        if duration_minutes >= 60:
+            hours = duration_minutes // 60
+            remaining_mins = duration_minutes % 60
+            if remaining_mins > 0:
+                duration_text = f"{hours} hour{'s' if hours > 1 else ''} and {remaining_mins} minute{'s' if remaining_mins > 1 else ''}"
+            else:
+                duration_text = f"{hours} hour{'s' if hours > 1 else ''}"
+        else:
+            duration_text = f"{duration_minutes} minute{'s' if duration_minutes > 1 else ''}"
+        
+        # Build summary
+        summary = f"📊 **Silent Mode Summary** ({duration_text})\n\n"
+        summary += f"✅ **Total actions processed:** {total_actions}\n\n"
+        
+        if action_types:
+            summary += "📈 **Actions by type:**\n"
+            for action_type, count in sorted(action_types.items()):
+                emoji = {
+                    'add_task': '➕',
+                    'update_task': '✏️',
+                    'complete_task': '✅',
+                    'delete_task': '🗑️',
+                    'set_reminder': '⏰',
+                    'add_memory': '🧠',
+                    'search_memories': '🔍',
+                    'add_journal': '📝',
+                    'schedule_ai_action': '🤖'
+                }.get(action_type, '🔹')
+                
+                action_name = action_type.replace('_', ' ').title()
+                summary += f"  {emoji} {action_name}: {count}\n"
+        
+        summary += "\n🔊 **You're back online!** I'm ready to respond to your messages again."
+        
+        return summary
+        
+    except Exception as e:
+        print(f"!!! ERROR in generate_silent_mode_summary: {e}")
+        return "📊 **Silent Mode Summary**\n\nSummary generation failed, but silent mode has ended successfully."
+
+def accumulate_silent_action(supabase, user_id, action_type, action_details):
+    """Accumulates an action during silent mode instead of executing it."""
+    try:
+        active_session = database_silent.get_active_silent_session(supabase, user_id)
+        
+        if not active_session:
+            return False  # Not in silent mode
+        
+        # Add action to accumulated actions
+        action_data = {
+            'action_type': action_type,
+            'details': action_details,
+            'user_input': action_details.get('user_input', '')
+        }
+        
+        success = database_silent.add_action_to_silent_session(supabase, active_session['id'], action_data)
+        
+        if success:
+            print(f"Action {action_type} accumulated in silent session {active_session['id']}")
+        
+        return success
+        
+    except Exception as e:
+        print(f"!!! ERROR in accumulate_silent_action: {e}")
+        return False
+
+def check_and_end_expired_silent_sessions(supabase):
+    """Checks for and ends expired silent sessions. Used by scheduler."""
+    try:
+        expired_sessions = database_silent.get_expired_silent_sessions(supabase)
+        ended_count = 0
+        
+        for session in expired_sessions:
+            session_data = database_silent.end_silent_session(supabase, session['id'], 'expired')
+            if session_data:
+                ended_count += 1
+                
+                # Generate and send summary to user
+                try:
+                    user_phone = database_personal.get_user_phone_by_id(supabase, session['user_id'])
+                    if user_phone:
+                        summary = generate_silent_mode_summary(session_data)
+                        # This would be sent via the messaging service
+                        print(f"Silent mode summary ready for user {session['user_id']}: {summary[:100]}...")
+                        
+                except Exception as summary_error:
+                    print(f"!!! ERROR sending silent mode summary: {summary_error}")
+        
+        return ended_count
+        
+    except Exception as e:
+        print(f"!!! ERROR in check_and_end_expired_silent_sessions: {e}")
+        return 0
+
 # --- The Master Dictionary of All Available Tools ---
 AVAILABLE_TOOLS = {
     # Tasks
@@ -1838,6 +2169,8 @@ AVAILABLE_TOOLS = {
     "schedule_ai_action": schedule_ai_action, "update_ai_action": update_ai_action, "delete_ai_action": delete_ai_action, "list_ai_actions": list_ai_actions,
     # Daily Productivity Tools
     "task_for_day": task_for_day, "summary_of_day": summary_of_day, "ai_action_helper": ai_action_helper,
+    # Silent Mode Tools
+    "activate_silent_mode": activate_silent_mode, "deactivate_silent_mode": deactivate_silent_mode, "get_silent_status": get_silent_status,
 }
 
 
