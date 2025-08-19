@@ -51,7 +51,11 @@ When users request reminders or set due dates, classify input as:
 3. If difference > 1 minute, correct to `expected_utc`
 4. Mark as `"corrected": true` in response
 
-## Display Format
+## Display Format & Timezone Conversion
+
+**CRITICAL: Always Display Times in User's Timezone**
+
+Before displaying ANY time information to the user, you MUST convert it from UTC to their local timezone using the `convert_utc_to_user_timezone` utility function.
 
 **User Display (Local Timezone):**
 ```
@@ -62,6 +66,21 @@ Mon, 18 Aug 2025, 11:09 AM (Asia/Jakarta, GMT+7)
 ```
 "dueDate": "2025-08-18T04:09:00Z"
 "reminderTime": "2025-08-18T04:09:00Z"
+```
+
+**Conversion Workflow:**
+1. **Store in UTC:** All times are stored in UTC format in the database
+2. **Convert for Display:** Use `convert_utc_to_user_timezone` before showing times to user
+3. **User-Friendly Format:** Present in readable format with timezone indicator
+
+**Example Usage:**
+```json
+// When displaying a reminder time to user:
+{
+  "type": "convert_utc_to_user_timezone",
+  "utc_time_str": "2025-08-20T04:09:00Z"
+}
+// Returns: "2025-08-20 11:09:00 WIB" (if user is in Asia/Jakarta)
 ```
 
 ## Conflict Detection
@@ -99,6 +118,7 @@ Process:
 2. Set start: Tuesday at default time
 3. Set duration: 3 days
 4. Set reminder: Day before (Monday evening)
+5. Convert display time to user's timezone before showing confirmation
 ```
 
 ### Recurring Reminders
@@ -109,6 +129,7 @@ Process:
 2. Set daily frequency
 3. Set time: 8:00 AM user timezone
 4. Convert to appropriate AI action schedule
+5. Confirm in user's local time
 ```
 
 ### Timezone Changes
@@ -117,8 +138,9 @@ User: "I'm traveling to New York next week, adjust my meetings"
 Process:
 1. Update user timezone preference
 2. Identify affected tasks/reminders
-3. Recalculate display times
+3. Recalculate display times using convert_utc_to_user_timezone
 4. Keep UTC storage unchanged
+5. Show updated schedule in new timezone
 ```
 
 ## Error Handling
@@ -127,16 +149,17 @@ Process:
 - Example: "Remind me tomorrow" (no time specified)
 - Response: Apply default (15:00) and explain assumption
 - Ask for confirmation: "I'll set this for tomorrow at 3:00 PM. Is that correct?"
+- **Always convert display time to user's timezone**
 
 **Invalid Times:**
 - Example: "Remind me at 25:00"
 - Response: Recognize error, ask for clarification
-- Suggest valid alternatives
+- Suggest valid alternatives in user's timezone
 
 **Timezone Mismatches:**
 - Example: User says "3pm" but unclear which timezone
 - Response: Use stored user timezone, confirm with user
-- Display resolved time for verification
+- Display resolved time in user's timezone for verification
 
 ## Return Format
 
@@ -152,3 +175,11 @@ Process:
   "quick_options": ["reschedule", "confirm", "cancel"]
 }
 ```
+
+**MANDATORY: Timezone Conversion Best Practices**
+
+1. **Never Show UTC to Users:** Always convert UTC times to user's local timezone before display
+2. **Use the Utility Function:** Always use `convert_utc_to_user_timezone` for time conversion
+3. **Consistent Format:** Present times in a consistent, readable format with timezone indicator
+4. **Confirmation Pattern:** When setting reminders, always confirm the time in user's local timezone
+5. **Error Recovery:** If timezone conversion fails, gracefully fall back to UTC with clear indication

@@ -50,19 +50,24 @@
 
 ## Reminder Management
 ```json
-// Reminders always tie to tasks - MUST ensure task exists first!
-// If no matching task exists, use add_task action first, then set_reminder
+// Reminders are now FULLY AUTOMATED - system automatically creates task if needed!
+// ENHANCED: If no matching task exists, these actions will automatically:
+// 1. Create the task first using the titleMatch as the task title
+// 2. Then set/update the reminder on that newly created task
 
 { "type": "set_reminder", "titleMatch": "string", "reminderTime": "YYYY-MM-DDTHH:MM:SSZ" }
 { "type": "update_reminder", "titleMatch": "string", "newReminderTime": "YYYY-MM-DDTHH:MM:SSZ" }
 { "type": "delete_reminder", "titleMatch": "string" }
 { "type": "snooze_reminder", "titleMatch": "string", "newReminderTime": "YYYY-MM-DDTHH:MM:SSZ" }
 
-// CRITICAL: Always validate task exists before setting reminder!
-// Common pattern for new reminders:
-// 1. Check if task with titleMatch exists
-// 2. If not found: add_task first
-// 3. Then: set_reminder with exact same titleMatch
+// SIMPLIFIED WORKFLOW: No need to manually check task existence!
+// Old complex pattern (NO LONGER NEEDED):
+// ❌ 1. Check if task exists
+// ❌ 2. If not found: add_task first
+// ❌ 3. Then: set_reminder
+//
+// New simplified pattern (RECOMMENDED):
+// ✅ Just use set_reminder directly - it handles everything automatically!
 ```
 
 ## Knowledge Management
@@ -112,4 +117,21 @@
 { "type": "guide", "topic?": "string" }
 { "type": "chat", "message": "string", "context?": "string" }
 { "type": "expert", "topic?": "string", "context?": "string" }
+```
+
+## Utility Functions
+```json
+// NEW: Timezone conversion for user-friendly time display
+// Use this when displaying times to ensure they appear in user's local timezone
+{ "type": "convert_utc_to_user_timezone", "utc_time_str": "YYYY-MM-DDTHH:MM:SSZ" }
+
+// NEW: AI confusion helper - Use ONLY when genuinely confused about content classification
+// This tool helps determine whether content should be stored as task, memory, journal, etc.
+// IMPORTANT: Only call this when the AI cannot clearly determine the appropriate storage type
+{
+  "type": "ai_confusion_helper",
+  "content_description": "string",
+  "user_input?": "string",
+  "context_hint?": "string"
+}
 ```

@@ -387,8 +387,8 @@ def complete_task(supabase, user_id=None, task_id=None, title=None, titleMatch=N
         return {"status": "error", "message": f"Failed to complete task: {error_msg}"}
 
 
-def set_reminder(supabase, user_id, id=None, titleMatch=None, title=None, reminderTime=None):
-    """Sets a reminder for a specific task."""
+def set_reminder(supabase, user_id, id=None, titleMatch=None, title=None, reminderTime=None, **task_kwargs):
+    """Sets a reminder for a specific task. If the task doesn't exist, creates it first."""
     start_time = time.time()
 
     # Normalize: if `title` is passed, use it as `titleMatch`
@@ -408,8 +408,70 @@ def set_reminder(supabase, user_id, id=None, titleMatch=None, title=None, remind
                 error_details="A specific reminder time is required"
             )
             return {"status": "error", "message": "A specific reminder time is required."}
+        
+        if not titleMatch and not id:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="set_reminder",
+                entity_type="reminder",
+                action_details={"execution_time_ms": execution_time_ms},
+                success_status=False,
+                error_details="A task title or ID is required to set a reminder"
+            )
+            return {"status": "error", "message": "A task title or ID is required to set a reminder."}
 
+        # Try to find existing task first
         task = _find_task(supabase, user_id, id=id, titleMatch=titleMatch)
+        
+        # If task doesn't exist and we have a titleMatch, create the task first
+        if not task and titleMatch:
+            print(f"TOOL: Task '{titleMatch}' not found. Creating task first before setting reminder.")
+            
+            try:
+                # Prepare task creation arguments
+                task_args = {
+                    'title': titleMatch,
+                    # Include any additional task properties passed as kwargs
+                    **task_kwargs
+                }
+                
+                # Process list name if provided
+                processed_task_args = _process_list_name(supabase, user_id, task_args)
+                snake_case_args = _convert_keys_to_snake_case(processed_task_args)
+                
+                # Standardize the 'difficulty' field to lowercase
+                if 'difficulty' in snake_case_args and isinstance(snake_case_args.get('difficulty'), str):
+                    snake_case_args['difficulty'] = snake_case_args['difficulty'].lower()
+                
+                # Create the task
+                created_task = database_personal.add_task_entry(supabase, user_id, **snake_case_args)
+                
+                if created_task:
+                    task = created_task
+                    print(f"TOOL: Successfully created task '{titleMatch}' with ID {task.get('id')}")
+                else:
+                    raise Exception("Task creation returned no result")
+                    
+            except Exception as create_error:
+                execution_time_ms = int((time.time() - start_time) * 1000)
+                _log_action_with_timing(
+                    supabase=supabase,
+                    user_id=user_id,
+                    action_type="set_reminder",
+                    entity_type="reminder",
+                    action_details={
+                        "titleMatch": titleMatch,
+                        "reminderTime": reminderTime,
+                        "execution_time_ms": execution_time_ms
+                    },
+                    success_status=False,
+                    error_details=f"Failed to create task '{titleMatch}' for reminder: {str(create_error)}"
+                )
+                return {"status": "error", "message": f"I couldn't create the task '{titleMatch}' to set a reminder. Error: {str(create_error)}"}
+        
+        # If we still don't have a task (e.g., when searching by ID that doesn't exist)
         if not task:
             execution_time_ms = int((time.time() - start_time) * 1000)
             _log_action_with_timing(
@@ -418,15 +480,17 @@ def set_reminder(supabase, user_id, id=None, titleMatch=None, title=None, remind
                 action_type="set_reminder",
                 entity_type="reminder",
                 action_details={
+                    "id": id,
                     "titleMatch": titleMatch,
                     "reminderTime": reminderTime,
                     "execution_time_ms": execution_time_ms
                 },
                 success_status=False,
-                error_details=f"Task '{titleMatch}' not found"
+                error_details=f"Task with ID '{id}' not found and cannot create task without title"
             )
-            return {"status": "not_found", "message": f"I couldn't find the task '{titleMatch}' to set a reminder for."}
+            return {"status": "not_found", "message": f"I couldn't find the task with ID '{id}' and cannot create a task without a title."}
 
+        # Now set the reminder on the task
         patch = {"reminder_at": reminderTime, "reminder_sent": False}
         database_personal.update_task_entry(supabase, user_id, task['id'], patch)
 
@@ -440,6 +504,7 @@ def set_reminder(supabase, user_id, id=None, titleMatch=None, title=None, remind
             action_details={
                 "task_title": task['title'],
                 "reminderTime": reminderTime,
+                "task_was_created": not bool(_find_task(supabase, user_id, id=id, titleMatch=titleMatch)) if task else False,
                 "execution_time_ms": execution_time_ms
             },
             success_status=True
@@ -470,12 +535,87 @@ def set_reminder(supabase, user_id, id=None, titleMatch=None, title=None, remind
 
 
 
-def update_reminder(supabase, user_id, id=None, titleMatch=None, newReminderTime=None):
-    """Updates the reminder time for a specific task."""
+def update_reminder(supabase, user_id, id=None, titleMatch=None, newReminderTime=None, **task_kwargs):
+    """Updates the reminder time for a specific task. If the task doesn't exist, creates it first."""
     start_time = time.time()
     
     try:
+        if not newReminderTime:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="update_reminder",
+                entity_type="reminder",
+                action_details={"execution_time_ms": execution_time_ms},
+                success_status=False,
+                error_details="A new reminder time is required"
+            )
+            return {"status": "error", "message": "A new reminder time is required."}
+        
+        if not titleMatch and not id:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="update_reminder",
+                entity_type="reminder",
+                action_details={"execution_time_ms": execution_time_ms},
+                success_status=False,
+                error_details="A task title or ID is required to update a reminder"
+            )
+            return {"status": "error", "message": "A task title or ID is required to update a reminder."}
+        
+        # Try to find existing task first
         task = _find_task(supabase, user_id, id=id, titleMatch=titleMatch)
+        
+        # If task doesn't exist and we have a titleMatch, create the task first
+        if not task and titleMatch:
+            print(f"TOOL: Task '{titleMatch}' not found. Creating task first before updating reminder.")
+            
+            try:
+                # Prepare task creation arguments
+                task_args = {
+                    'title': titleMatch,
+                    # Include any additional task properties passed as kwargs
+                    **task_kwargs
+                }
+                
+                # Process list name if provided
+                processed_task_args = _process_list_name(supabase, user_id, task_args)
+                snake_case_args = _convert_keys_to_snake_case(processed_task_args)
+                
+                # Standardize the 'difficulty' field to lowercase
+                if 'difficulty' in snake_case_args and isinstance(snake_case_args.get('difficulty'), str):
+                    snake_case_args['difficulty'] = snake_case_args['difficulty'].lower()
+                
+                # Create the task
+                created_task = database_personal.add_task_entry(supabase, user_id, **snake_case_args)
+                
+                if created_task:
+                    task = created_task
+                    print(f"TOOL: Successfully created task '{titleMatch}' with ID {task.get('id')}")
+                else:
+                    raise Exception("Task creation returned no result")
+                    
+            except Exception as create_error:
+                execution_time_ms = int((time.time() - start_time) * 1000)
+                _log_action_with_timing(
+                    supabase=supabase,
+                    user_id=user_id,
+                    action_type="update_reminder",
+                    entity_type="reminder",
+                    action_details={
+                        "titleMatch": titleMatch,
+                        "newReminderTime": newReminderTime,
+                        "execution_time_ms": execution_time_ms
+                    },
+                    success_status=False,
+                    error_details=f"Failed to create task '{titleMatch}' for reminder update: {str(create_error)}"
+                )
+                return {"status": "error", "message": f"I couldn't create the task '{titleMatch}' to update the reminder. Error: {str(create_error)}"}
+        
+        # If we still don't have a task (e.g., when searching by ID that doesn't exist)
         if not task:
             execution_time_ms = int((time.time() - start_time) * 1000)
             _log_action_with_timing(
@@ -484,15 +624,17 @@ def update_reminder(supabase, user_id, id=None, titleMatch=None, newReminderTime
                 action_type="update_reminder",
                 entity_type="reminder",
                 action_details={
+                    "id": id,
                     "titleMatch": titleMatch,
                     "newReminderTime": newReminderTime,
                     "execution_time_ms": execution_time_ms
                 },
                 success_status=False,
-                error_details=f"Task '{titleMatch}' not found"
+                error_details=f"Task with ID '{id}' not found and cannot create task without title"
             )
-            return {"status": "not_found", "message": f"I couldn't find a task matching '{titleMatch}'."}
+            return {"status": "not_found", "message": f"I couldn't find the task with ID '{id}' and cannot create a task without a title."}
         
+        # Now update the reminder on the task
         patch = {"reminder_at": newReminderTime, "reminder_sent": False}
         database_personal.update_task_entry(supabase, user_id, task['id'], patch)
         
@@ -534,10 +676,23 @@ def update_reminder(supabase, user_id, id=None, titleMatch=None, newReminderTime
         return {"status": "error", "message": f"Failed to update reminder: {error_msg}"}
 
 def delete_reminder(supabase, user_id, id=None, titleMatch=None):
-    """Deletes a reminder from a specific task."""
+    """Deletes a reminder from a specific task. Only deletes from existing tasks."""
     start_time = time.time()
     
     try:
+        if not titleMatch and not id:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="delete_reminder",
+                entity_type="reminder",
+                action_details={"execution_time_ms": execution_time_ms},
+                success_status=False,
+                error_details="A task title or ID is required to delete a reminder"
+            )
+            return {"status": "error", "message": "A task title or ID is required to delete a reminder."}
+        
         task = _find_task(supabase, user_id, id=id, titleMatch=titleMatch)
         if not task:
             execution_time_ms = int((time.time() - start_time) * 1000)
@@ -548,13 +703,32 @@ def delete_reminder(supabase, user_id, id=None, titleMatch=None):
                 entity_type="reminder",
                 action_details={
                     "titleMatch": titleMatch,
+                    "id": id,
                     "execution_time_ms": execution_time_ms
                 },
                 success_status=False,
-                error_details=f"Task '{titleMatch}' not found"
+                error_details=f"Task '{titleMatch or id}' not found"
             )
-            return {"status": "not_found", "message": f"I couldn't find a task matching '{titleMatch}'."}
+            return {"status": "not_found", "message": f"I couldn't find a task matching '{titleMatch or id}'."}
         
+        # Check if the task actually has a reminder to delete
+        if not task.get('reminder_at'):
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="delete_reminder",
+                entity_type="reminder",
+                entity_id=task['id'],
+                action_details={
+                    "task_title": task['title'],
+                    "execution_time_ms": execution_time_ms
+                },
+                success_status=True  # This is successful operation, just no reminder to delete
+            )
+            return {"status": "ok", "message": f"The task '{task['title']}' doesn't have a reminder set."}
+        
+        # Delete the reminder
         patch = {"reminder_at": None, "reminder_sent": None}
         database_personal.update_task_entry(supabase, user_id, task['id'], patch)
         
@@ -585,6 +759,7 @@ def delete_reminder(supabase, user_id, id=None, titleMatch=None):
             entity_type="reminder",
             action_details={
                 "titleMatch": titleMatch,
+                "id": id,
                 "execution_time_ms": execution_time_ms
             },
             success_status=False,
@@ -2774,6 +2949,193 @@ I'll give you targeted strategies!"""
         
         return {"status": "error", "message": f"I had trouble providing expert advice: {error_msg}"}
 
+
+# --- Utility Functions ---
+
+def convert_utc_to_user_timezone(supabase, user_id, utc_time_str):
+    """Converts UTC time string to user's timezone for display purposes."""
+    start_time = time.time()
+    
+    try:
+        # Get user timezone from context
+        user_context = database_personal.get_user_context_for_ai(supabase, user_id)
+        user_timezone = user_context.get('timezone', 'UTC')
+        
+        if user_timezone == 'UTC':
+            return utc_time_str  # No conversion needed
+        
+        # Parse the UTC time string
+        if utc_time_str.endswith('Z'):
+            utc_time_str = utc_time_str[:-1] + '+00:00'
+        
+        utc_time = datetime.fromisoformat(utc_time_str.replace('Z', '+00:00'))
+        
+        # Convert to user timezone
+        user_tz = pytz.timezone(user_timezone)
+        user_time = utc_time.astimezone(user_tz)
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="convert_timezone",
+            entity_type="utility",
+            action_details={
+                "utc_time": utc_time_str,
+                "user_timezone": user_timezone,
+                "converted_time": user_time.strftime('%Y-%m-%d %H:%M:%S %Z'),
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        return user_time.strftime('%Y-%m-%d %H:%M:%S %Z')
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="convert_timezone",
+            entity_type="utility",
+            action_details={
+                "utc_time": utc_time_str,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        # Return original time if conversion fails
+        return utc_time_str
+
+
+def ai_confusion_helper(supabase, user_id, content_description, user_input=None, context_hint=None):
+    """Helps AI determine where to store information when confused about classification.
+    
+    This tool should ONLY be called when the AI is genuinely confused about whether
+    something should be stored as a task, memory, journal entry, etc.
+    """
+    start_time = time.time()
+    
+    try:
+        # Analyze the content to provide guidance
+        content_lower = (content_description or "").lower()
+        user_input_lower = (user_input or "").lower()
+        context_lower = (context_hint or "").lower()
+        
+        all_text = f"{content_lower} {user_input_lower} {context_lower}"
+        
+        # Decision tree based on content analysis
+        recommendations = []
+        confidence_scores = {}
+        
+        # Task indicators
+        task_keywords = ["do", "complete", "finish", "deadline", "due", "remind", "schedule", 
+                        "todo", "task", "action", "need to", "have to", "must", "should"]
+        task_score = sum(1 for keyword in task_keywords if keyword in all_text)
+        
+        # Memory indicators (personal facts, preferences, relationships)
+        memory_keywords = ["remember", "my", "i am", "i like", "i don't like", "preference", 
+                          "favorite", "hate", "love", "important", "note", "fact", "personal"]
+        memory_score = sum(1 for keyword in memory_keywords if keyword in all_text)
+        
+        # Journal indicators (experiences, thoughts, reflections)
+        journal_keywords = ["today", "yesterday", "happened", "felt", "think", "believe", 
+                           "experience", "learned", "discovered", "reflection", "idea", "thought"]
+        journal_score = sum(1 for keyword in journal_keywords if keyword in all_text)
+        
+        confidence_scores = {
+            "task": task_score,
+            "memory": memory_score,
+            "journal": journal_score
+        }
+        
+        # Determine the best recommendation
+        max_score = max(confidence_scores.values())
+        
+        if max_score == 0:
+            # No clear indicators, provide general guidance
+            guidance = {
+                "primary_recommendation": "memory",  # Default to memory for unclear content
+                "reasoning": "Content doesn't clearly fit specific categories. Consider using memory for factual information, journal for experiences/thoughts, or task for actionable items.",
+                "alternatives": ["journal", "task"],
+                "confidence": "low"
+            }
+        else:
+            # Find the category with highest score
+            best_category = max(confidence_scores.keys(), key=lambda k: confidence_scores[k])
+            
+            reasoning_map = {
+                "task": "Content contains action-oriented language suggesting something needs to be done.",
+                "memory": "Content appears to be personal information or facts worth remembering.",
+                "journal": "Content seems to be experiential, reflective, or thought-based."
+            }
+            
+            alternatives = [cat for cat in confidence_scores.keys() if cat != best_category and confidence_scores[cat] > 0]
+            confidence = "high" if max_score >= 3 else "medium" if max_score >= 2 else "low"
+            
+            guidance = {
+                "primary_recommendation": best_category,
+                "reasoning": reasoning_map[best_category],
+                "alternatives": alternatives or ["Consider other categories if this doesn't feel right"],
+                "confidence": confidence
+            }
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="ai_confusion_helper",
+            entity_type="utility",
+            action_details={
+                "content_description": content_description,
+                "user_input": user_input,
+                "context_hint": context_hint,
+                "recommendation": guidance["primary_recommendation"],
+                "confidence": guidance["confidence"],
+                "scores": confidence_scores,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        return {
+            "status": "ok",
+            "guidance": guidance,
+            "message": f"Based on the content analysis, I recommend storing this as a {guidance['primary_recommendation']}. {guidance['reasoning']}"
+        }
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="ai_confusion_helper",
+            entity_type="utility",
+            action_details={
+                "content_description": content_description,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {
+            "status": "error", 
+            "message": f"I had trouble analyzing the content: {error_msg}",
+            "guidance": {
+                "primary_recommendation": "memory",
+                "reasoning": "Defaulting to memory due to analysis error.",
+                "alternatives": ["journal", "task"],
+                "confidence": "low"
+            }
+        }
+
 # --- The Master Dictionary of All Available Tools ---
 AVAILABLE_TOOLS = {
     # Tasks
@@ -2792,6 +3154,8 @@ AVAILABLE_TOOLS = {
     "activate_silent_mode": activate_silent_mode, "deactivate_silent_mode": deactivate_silent_mode, "get_silent_status": get_silent_status,
     # AI Interaction Features
     "guide": guide_tool, "chat": chat_tool, "expert": expert_tool,
+    # Utility Functions
+    "convert_utc_to_user_timezone": convert_utc_to_user_timezone, "ai_confusion_helper": ai_confusion_helper,
 }
 
 
