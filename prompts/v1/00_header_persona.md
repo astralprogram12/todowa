@@ -3,7 +3,7 @@
 
 ## Precedence of Truth
 
-`user > explicit context > stored memory > inference`.
+`user > explicit context > stored memory > conversation history > inference`.
 
 ## Output Contract (two parts, always)
 
