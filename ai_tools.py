@@ -387,10 +387,14 @@ def complete_task(supabase, user_id=None, task_id=None, title=None, titleMatch=N
         return {"status": "error", "message": f"Failed to complete task: {error_msg}"}
 
 
-def set_reminder(supabase, user_id, id=None, titleMatch=None, reminderTime=None):
+def set_reminder(supabase, user_id, id=None, titleMatch=None, title=None, reminderTime=None):
     """Sets a reminder for a specific task."""
     start_time = time.time()
-    
+
+    # Normalize: if `title` is passed, use it as `titleMatch`
+    if title and not titleMatch:
+        titleMatch = title
+
     try:
         if not reminderTime:
             execution_time_ms = int((time.time() - start_time) * 1000)
@@ -404,7 +408,7 @@ def set_reminder(supabase, user_id, id=None, titleMatch=None, reminderTime=None)
                 error_details="A specific reminder time is required"
             )
             return {"status": "error", "message": "A specific reminder time is required."}
-            
+
         task = _find_task(supabase, user_id, id=id, titleMatch=titleMatch)
         if not task:
             execution_time_ms = int((time.time() - start_time) * 1000)
@@ -422,10 +426,10 @@ def set_reminder(supabase, user_id, id=None, titleMatch=None, reminderTime=None)
                 error_details=f"Task '{titleMatch}' not found"
             )
             return {"status": "not_found", "message": f"I couldn't find the task '{titleMatch}' to set a reminder for."}
-            
+
         patch = {"reminder_at": reminderTime, "reminder_sent": False}
         database_personal.update_task_entry(supabase, user_id, task['id'], patch)
-        
+
         execution_time_ms = int((time.time() - start_time) * 1000)
         _log_action_with_timing(
             supabase=supabase,
@@ -440,13 +444,13 @@ def set_reminder(supabase, user_id, id=None, titleMatch=None, reminderTime=None)
             },
             success_status=True
         )
-        
+
         return {"status": "ok", "message": f"Reminder set for '{task['title']}'."}
-        
+
     except Exception as e:
         execution_time_ms = int((time.time() - start_time) * 1000)
         error_msg = str(e)
-        
+
         _log_action_with_timing(
             supabase=supabase,
             user_id=user_id,
@@ -460,8 +464,11 @@ def set_reminder(supabase, user_id, id=None, titleMatch=None, reminderTime=None)
             success_status=False,
             error_details=error_msg
         )
-        
+
         return {"status": "error", "message": f"Failed to set reminder: {error_msg}"}
+
+
+
 
 def update_reminder(supabase, user_id, id=None, titleMatch=None, newReminderTime=None):
     """Updates the reminder time for a specific task."""
