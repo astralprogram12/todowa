@@ -2,6 +2,7 @@
 from supabase import Client
 from datetime import date
 from config import UNVERIFIED_LIMIT, VERIFIED_LIMIT
+import uuid
 
 # --- User and Usage Functions ---
 
