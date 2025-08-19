@@ -10,6 +10,7 @@ import traceback
 # Ensure these files exist in the same directory and are correctly named.
 import config
 import database_personal
+import database_silent
 import services
 import agent
 from ai_tools import AVAILABLE_TOOLS
@@ -101,11 +102,80 @@ def webhook():
             services.send_fonnte_message(sender_phone, reply)
             return jsonify({"status": "unauthorized_user_prompted"}), 200
 
-        # --- 2. Manage Conversation History ---
+        # --- 2. Check Silent Mode Status ---
+        active_silent_session = database_silent.get_active_silent_session(supabase, user_id)
+        is_silent_mode = active_silent_session is not None
+        
+        # Check for silent mode commands first
+        message_lower = message_text.lower().strip()
+        
+        # Handle silent mode deactivation commands
+        if is_silent_mode and any(cmd in message_lower for cmd in ['exit silent', 'end silent', 'stop silent', 'deactivate silent']):
+            try:
+                tool_result = AVAILABLE_TOOLS['deactivate_silent_mode'](supabase, user_id)
+                if tool_result and tool_result.get('status') == 'ok':
+                    services.send_fonnte_message(sender_phone, tool_result.get('message', 'Silent mode ended.'))
+                    return jsonify({"status": "success", "action": "silent_mode_deactivated"}), 200
+            except Exception as e:
+                print(f"!!! ERROR deactivating silent mode: {e}")
+                services.send_fonnte_message(sender_phone, "I had trouble ending silent mode, but let me try to process your message normally.")
+        
+        # Handle silent mode activation commands
+        elif not is_silent_mode and any(cmd in message_lower for cmd in ['silent for', 'don\'t reply for', 'go silent', 'activate silent']):
+            # Extract duration from message
+            duration_minutes = None
+            try:
+                import re
+                # Look for patterns like "for 2 hours", "for 60 minutes"
+                hour_match = re.search(r'for\s+(\d+)\s*h(?:our)?s?', message_lower)
+                minute_match = re.search(r'for\s+(\d+)\s*m(?:inute)?s?', message_lower)
+                
+                if hour_match:
+                    duration_minutes = int(hour_match.group(1)) * 60
+                elif minute_match:
+                    duration_minutes = int(minute_match.group(1))
+                else:
+                    # Default to 1 hour if no specific time mentioned
+                    duration_minutes = 60
+                
+                tool_result = AVAILABLE_TOOLS['activate_silent_mode'](supabase, user_id, duration_minutes=duration_minutes)
+                if tool_result:
+                    services.send_fonnte_message(sender_phone, tool_result.get('message', 'Silent mode activated.'))
+                    return jsonify({"status": "success", "action": "silent_mode_activated"}), 200
+            except Exception as e:
+                print(f"!!! ERROR activating silent mode: {e}")
+                services.send_fonnte_message(sender_phone, "I had trouble activating silent mode. Please try again.")
+                return jsonify({"status": "error", "action": "silent_mode_activation_failed"}), 500
+        
+        # If in silent mode and not a deactivation command, accumulate the message
+        if is_silent_mode:
+            print(f"\n--- SILENT MODE: Accumulating message from {sender_phone} ---")
+            try:
+                # Add the user input to silent session
+                action_data = {
+                    'action_type': 'user_message',
+                    'details': {
+                        'message': message_text,
+                        'phone': sender_phone,
+                        'user_input': message_text
+                    }
+                }
+                database_silent.add_action_to_silent_session(supabase, active_silent_session['id'], action_data)
+                print(f"Message accumulated in silent session {active_silent_session['id']}")
+                
+                # Don't send any reply - just return success
+                return jsonify({"status": "success", "action": "message_accumulated_silent_mode"}), 200
+                
+            except Exception as e:
+                print(f"!!! ERROR accumulating message in silent mode: {e}")
+                # If there's an error with silent mode, process normally as fallback
+                pass
+        
+        # --- 3. Manage Conversation History ---
         history = CONVERSATION_HISTORIES.get(sender_phone, [])
         history.append({"role": "user", "content": message_text})
         
-        # --- 3. Get All Context and Run Agent ---
+        # --- 4. Get All Context and Run Agent ---
         print("\n--- AGENT RUN ---")
         
         # Fetch all context types required by the agent's system prompt
@@ -145,7 +215,7 @@ def webhook():
         except Exception as e:
             print(f"!!! ERROR STORING CONVERSATION HISTORY: {e}")
 
-        # --- 4. Execute the AI's Action Plan ---
+        # --- 5. Execute the AI's Action Plan ---
         final_reply = conversational_reply  # <-- keep this as the default
 
         if actions:
@@ -156,6 +226,22 @@ def webhook():
 
                     try:
                         print(f"EXECUTING ACTION: {action_type} with args {action_args}")
+                        
+                        # Check if we should accumulate this action in silent mode
+                        # (This is a backup check - main silent mode logic is handled above)
+                        current_silent_session = database_silent.get_active_silent_session(supabase, user_id)
+                        if current_silent_session and action_type not in ['deactivate_silent_mode', 'get_silent_status']:
+                            # Accumulate action instead of executing
+                            action_data = {
+                                'action_type': action_type,
+                                'details': action_args,
+                                'user_input': message_text
+                            }
+                            database_silent.add_action_to_silent_session(supabase, current_silent_session['id'], action_data)
+                            print(f"Action {action_type} accumulated in silent mode")
+                            continue
+                        
+                        # Execute action normally
                         tool_result = AVAILABLE_TOOLS[action_type](supabase, user_id, **action_args)
 
                         # ✅ Only overwrite reply if the tool explicitly reports an error or important message
@@ -169,7 +255,7 @@ def webhook():
                 else:
                     print(f"!!! WARNING: Agent planned an unknown action type: '{action_type}'")
         
-        # --- 5. Send the Final Reply to the User ---
+        # --- 6. Send the Final Reply to the User ---
         services.send_fonnte_message(sender_phone, final_reply)
         return jsonify({"status": "success"}), 200
 

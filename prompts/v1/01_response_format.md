@@ -22,3 +22,9 @@
  5. Always output a summary banner of autofill choices and provide an undo suggestion.
 +
 + Confirmation content after add_task (required details): Title, Category, Priority, Due date (or "not set"), Tags (if inferred), Difficulty (if set), followed by a next-step question proposing 1–2 sensible options.
+
+**SILENT MODE HANDLING:**
+- For silent mode commands (activate/deactivate), system handles responses directly - minimize conversational reply
+- Silent mode commands use correct action types: activate_silent_mode, deactivate_silent_mode, get_silent_status
+- Duration parsing: Extract from phrases like "for 2 hours", "for 30 minutes". Default to 60 minutes if unspecified
+- Valid durations: 5 minutes to 12 hours
