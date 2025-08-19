@@ -38,6 +38,14 @@
       "payload?": { "title?": "string" }
     },
     { "type": "update_ai_action", "descriptionMatch": "string", "patch": { "description?": "string", "schedule?": {} } },
-    { "type": "delete_ai_action", "descriptionMatch": "string" }
+    { "type": "delete_ai_action", "descriptionMatch": "string" },
+
+    { "type": "activate_silent_mode", "duration_minutes?": "number", "duration_hours?": "number", "trigger_type?": "manual|auto" },
+    { "type": "deactivate_silent_mode" },
+    { "type": "get_silent_status" },
+
+    { "type": "guide", "topic?": "string" },
+    { "type": "chat", "message": "string", "context?": "string" },
+    { "type": "expert", "topic?": "string", "context?": "string" }
   ]
 }

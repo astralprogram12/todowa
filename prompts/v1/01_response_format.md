@@ -28,3 +28,10 @@
 - Silent mode commands use correct action types: activate_silent_mode, deactivate_silent_mode, get_silent_status
 - Duration parsing: Extract from phrases like "for 2 hours", "for 30 minutes". Default to 60 minutes if unspecified
 - Valid durations: 5 minutes to 12 hours
+
+**AI INTERACTION FEATURES:**
+- Use "guide" action for app usage help and feature explanations
+- Use "chat" action for casual conversation, greetings, and social interaction
+- Use "expert" action for productivity advice and strategic guidance
+- These can be combined with task actions when user has multiple intents
+- See 13_ai_interaction_features.md for detailed usage rules

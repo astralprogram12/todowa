@@ -2155,6 +2155,618 @@ def check_and_end_expired_silent_sessions(supabase):
         print(f"!!! ERROR in check_and_end_expired_silent_sessions: {e}")
         return 0
 
+# --- AI Interaction Features ---
+
+def guide_tool(supabase, user_id, **kwargs):
+    """Provides guidance on how to use the app when user is confused."""
+    start_time = time.time()
+    
+    try:
+        topic = kwargs.get('topic', '').lower()
+        
+        # Different guidance based on topic
+        if 'task' in topic or 'todo' in topic:
+            guidance = """📝 **Task Management Guide**
+
+**🎯 Basic Task Operations:**
+• **Add:** "Add task: Buy groceries" or "Remember: Call dentist"
+• **List:** "Show my tasks" or "What do I need to do?"
+• **Complete:** "Done: Buy groceries" or "Mark task 1 as completed"
+• **Update:** "Change task 1 to: Buy organic groceries"
+• **Delete:** "Remove task: Buy groceries"
+
+**⏰ Reminders:**
+• "Remind me to call mom at 3 PM"
+• "Set reminder in 2 hours: Check email"
+
+💡 **Tip:** I understand natural language, so speak naturally!"""
+        
+        elif 'remind' in topic or 'alarm' in topic:
+            guidance = """⏰ **Reminder Guide**
+
+**📅 Set Reminders:**
+• "Remind me to call mom at 3 PM tomorrow"
+• "Alert me in 30 minutes: Check the oven"
+• "Set reminder for Dec 25th: Christmas dinner"
+
+**🔧 Manage Reminders:**
+• "Show my reminders" - List all active reminders
+• "Cancel reminder for: Call mom"
+• "Move reminder to 4 PM: Meeting with John"
+
+💡 **Pro tip:** You can set reminders for both specific times and durations!"""
+        
+        elif 'silent' in topic or 'quiet' in topic:
+            guidance = """🔇 **Silent Mode Guide**
+
+**🤫 Activate Silent Mode:**
+• "Don't reply for 1 hour" - Manual silent mode
+• "Be quiet for 30 minutes"
+• "Go silent until 3 PM"
+
+**⚙️ Auto Silent Mode:**
+• "Enable daily silent mode 7-11 AM" - Automatic daily quiet hours
+• "Turn off auto silent mode"
+
+**🚪 Exit Early:**
+• "Exit silent mode" or "End silent mode"
+• "Am I in silent mode?" - Check status
+
+💡 **Note:** I'll process your requests during silent mode and send a summary when it ends!"""
+        
+        elif 'schedule' in topic or 'automat' in topic or 'recurring' in topic:
+            guidance = """🤖 **Automation & Scheduling Guide**
+
+**📅 Daily Summaries:**
+• "Send me daily summary at 8 AM"
+• "What should I focus on today?" - Instant task summary
+• "What did I accomplish today?" - Completion summary
+
+**🔄 Recurring Tasks:**
+• "Create task 'Take vitamins' every day at 9 AM"
+• "Weekly meeting reminder every Monday"
+
+**⚙️ Manage Automations:**
+• "Show my scheduled actions"
+• "Cancel daily summary automation"
+
+💡 **Popular:** Morning motivation and evening celebration summaries!"""
+        
+        else:
+            # General guidance
+            guidance = """🌟 **Welcome to your AI Assistant!**
+
+**🚀 What I can help with:**
+
+📝 **Task Management**
+• Add, complete, update, and organize your tasks
+• Set reminders for important deadlines
+• Get daily summaries of what needs attention
+
+🤖 **Smart Automation** 
+• Schedule recurring reminders and summaries
+• Get morning motivation and evening celebrations
+• Create repeating tasks automatically
+
+🔇 **Silent Mode**
+• Go quiet for focused work periods
+• Set automatic daily quiet hours
+• Get summaries of activity when you return
+
+💬 **Natural Conversation**
+• Ask me anything - I understand natural language!
+• Get advice on productivity and task organization
+• Chat casually when you need a break
+
+**🎯 Quick Start:**
+1. Try: "Add task: Learn something new"
+2. Ask: "What should I focus on today?"
+3. Say: "Don't reply for 30 minutes" when you need focus time
+
+**Need specific help?** Just ask me about any feature!"""
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        
+        # Log the guidance request
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="guide",
+            entity_type="help",
+            action_details={
+                "topic": topic,
+                "guidance_type": "app_usage",
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        return {
+            "status": "ok",
+            "message": guidance
+        }
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="guide",
+            entity_type="help",
+            action_details={"execution_time_ms": execution_time_ms},
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {"status": "error", "message": f"I had trouble providing guidance: {error_msg}"}
+
+def chat_tool(supabase, user_id, **kwargs):
+    """Handles casual conversation, random questions, and social interaction."""
+    start_time = time.time()
+    
+    try:
+        user_message = kwargs.get('message', '').lower()
+        context = kwargs.get('context', '')
+        
+        # Detect conversation type and respond appropriately
+        if any(greeting in user_message for greeting in ['hello', 'hi', 'hey', 'good morning', 'good afternoon', 'good evening']):
+            responses = [
+                "Hello! 👋 Great to see you! How can I help you stay productive today?",
+                "Hi there! 😊 I'm here and ready to help you tackle your tasks!",
+                "Hey! 🌟 What's on your agenda today? Let's make it happen!",
+                "Good to see you! ✨ Ready to turn your goals into achievements?"
+            ]
+            import random
+            response = random.choice(responses)
+        
+        elif any(word in user_message for word in ['test', 'testing', 'check']):
+            response = "🧪 **Test successful!** ✅\n\nI'm working perfectly and ready to help! Try asking me to:\n• Add a task\n• Show your schedule\n• Set a reminder\n• Or just chat - I'm here for you! 😊"
+        
+        elif any(word in user_message for word in ['how are you', 'how do you feel', 'what\'s up']):
+            response = "I'm doing great, thank you for asking! 🤖✨\n\nI'm energized and ready to help you be productive! Whether you need task management, reminders, or just want to chat - I'm here for you.\n\nHow are YOU doing today? Any goals you'd like to tackle? 🎯"
+        
+        elif any(word in user_message for word in ['thank you', 'thanks', 'appreciate']):
+            response = "You're very welcome! 😊🙏\n\nIt's my pleasure to help you stay organized and productive. That's what I'm here for!\n\nIs there anything else I can assist you with today? ✨"
+        
+        elif any(word in user_message for word in ['joke', 'funny', 'humor', 'laugh']):
+            jokes = [
+                "Why don't tasks ever get lonely? Because they always stick together in a to-do list! 📝😄",
+                "What did one reminder say to another? 'Don't worry, I've got your back... at 3 PM!' ⏰😊",
+                "Why are productivity apps so optimistic? Because they always believe you'll get things DONE! ✅🎉",
+                "What's a task's favorite music? Heavy metal... because it likes being COMPLETED! 🎵✅"
+            ]
+            import random
+            response = random.choice(jokes)
+        
+        elif any(word in user_message for word in ['weather', 'time', 'date']):
+            response = "🤖 I'm focused on helping you with tasks and productivity, so I don't have access to current weather or time data.\n\nBut I can help you:\n• Plan your day with task summaries\n• Set reminders for time-sensitive items\n• Schedule recurring actions\n\nWhat would you like to organize or plan today? 📅✨"
+        
+        elif any(word in user_message for word in ['bored', 'nothing to do', 'free time']):
+            response = "🌟 **Feeling free? Perfect time to be productive!**\n\nHere are some ideas:\n• ✅ Catch up on any pending tasks\n• 🧹 Organize your task list\n• 📝 Plan tomorrow's priorities\n• 🎯 Set some new goals\n• 🤖 Set up automations to make life easier\n\nOr just chat with me - I'm always here! What sounds interesting to you?"
+        
+        elif any(word in user_message for word in ['random', 'anything', 'whatever', 'idk', "don't know"]):
+            responses = [
+                "🎲 **Random productivity tip:** The 2-minute rule - if something takes less than 2 minutes, do it now instead of adding it to your task list!\n\nWhat's one quick thing you could tackle right now? ⚡",
+                "🌟 **Fun fact:** Your brain loves checking things off lists because it releases dopamine - that's why task completion feels so satisfying!\n\nWant to get that dopamine hit? Show me your tasks! 📝✨",
+                "💡 **Productivity thought:** The best time to plant a tree was 20 years ago. The second best time is now!\n\nWhat 'tree' (goal/project) would you like to start planting today? 🌱",
+                "🎯 **Daily wisdom:** You don't have to be perfect, you just have to be consistent.\n\nWhat's one small thing you can do consistently? Let's make it a task! 📈"
+            ]
+            import random
+            response = random.choice(responses)
+        
+        else:
+            # General conversational response
+            response = "😊 I hear you! While I love our chat, I'm especially good at helping with productivity and organization.\n\n🤔 **What's on your mind?**\n• Need help with tasks or reminders?\n• Want to plan your day?\n• Looking for productivity tips?\n• Just want to keep chatting?\n\nI'm here for whatever you need! ✨"
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        
+        # Log the chat interaction
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="chat",
+            entity_type="conversation",
+            action_details={
+                "user_message": kwargs.get('message', '')[:100],  # First 100 chars for privacy
+                "response_type": "casual_conversation",
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        return {
+            "status": "ok",
+            "message": response
+        }
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="chat",
+            entity_type="conversation",
+            action_details={"execution_time_ms": execution_time_ms},
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {"status": "error", "message": "😅 I got a bit tongue-tied there! What would you like to chat about?"}
+
+def expert_tool(supabase, user_id, **kwargs):
+    """Provides expert advice on task management, productivity, and goal achievement."""
+    start_time = time.time()
+    
+    try:
+        advice_topic = kwargs.get('topic', '').lower()
+        context = kwargs.get('context', '')
+        
+        # Provide expert advice based on the topic
+        if any(word in advice_topic for word in ['combine', 'merge', 'group', 'organize tasks']):
+            advice = """🧠 **Expert Advice: Task Organization & Combining**
+
+**🎯 Smart Task Combination Strategies:**
+
+**1. Context Grouping** 📍
+• Combine tasks by location: "Grocery store tasks" → Buy milk + pharmacy + dry cleaning
+• Batch by tool needed: All computer tasks together
+
+**2. Time-Boxing** ⏰
+• Small tasks (< 15min): Batch 3-4 together
+• "Quick wins session": Email replies + bills + calls
+
+**3. Energy Matching** ⚡
+• High-energy tasks: Creative work, problem-solving
+• Low-energy tasks: Administrative, organizing, emails
+
+**4. Project Clustering** 📊
+• Group related tasks under main projects
+• Example: "Website Launch" → Design + Content + Testing + Deploy
+
+**💡 Pro Tips:**
+• Don't combine more than 3-5 small tasks
+• Keep one "Big Rock" (important task) separate
+• Use task priorities to avoid combining urgent with non-urgent
+
+**Want me to help organize your current tasks?** Show me your list!"""
+        
+        elif any(word in advice_topic for word in ['first step', 'start', 'begin', 'getting started']):
+            advice = """🚀 **Expert Advice: First Steps to Success**
+
+**📋 The SMART Start Framework:**
+
+**1. Start Ridiculously Small** 🐣
+• Goal: "Get fit" → First step: "Put on gym shoes"
+• Goal: "Learn coding" → First step: "Open coding tutorial"
+• Goal: "Organize house" → First step: "Clear one drawer"
+
+**2. Make it Specific** 🎯
+• Vague: "Work on project" → Specific: "Write project outline"
+• Vague: "Be healthier" → Specific: "Drink one extra glass of water"
+
+**3. Time-bound** ⏰
+• "Today I will..." instead of "Someday I'll..."
+• Set mini-deadlines: "By 3 PM, I'll have..."
+
+**4. Link to Existing Habits** 🔗
+• "After I drink my morning coffee, I'll..."
+• "Before I check email, I'll..."
+
+**🎯 The 2-Minute Rule:**
+If the first step takes less than 2 minutes, do it NOW!
+
+**Example Breakdown:**
+• Goal: "Launch business"
+• Step 1: "Write one business idea on paper" (2 min)
+• Step 2: "Google one competitor" (5 min)
+• Step 3: "List 3 potential customers" (10 min)
+
+**Ready to break down your goal?** Tell me what you want to achieve!"""
+        
+        elif any(word in advice_topic for word in ['priority', 'important', 'urgent', 'focus']):
+            advice = """⚡ **Expert Advice: Priority & Focus Mastery**
+
+**📊 The Eisenhower Matrix:**
+
+**Quadrant 1: DO FIRST** 🔥
+• Urgent + Important → Handle immediately
+• Examples: Emergencies, crises, deadlines
+
+**Quadrant 2: SCHEDULE** 📅
+• Important but Not Urgent → Plan these!
+• Examples: Exercise, learning, relationship building
+• **This is where success lives!**
+
+**Quadrant 3: DELEGATE** 👥
+• Urgent but Not Important → Give to others
+• Examples: Some emails, calls, interruptions
+
+**Quadrant 4: ELIMINATE** 🗑️
+• Neither urgent nor important → Stop doing these
+• Examples: Social media scrolling, busywork
+
+**🎯 Daily Focus Strategy:**
+
+**The Big 3 Rule:**
+1. Choose 3 most important tasks for today
+2. Complete Big 3 before anything else
+3. Everything else is bonus
+
+**Energy Management:**
+• Peak energy hours → Most important/creative work
+• Low energy hours → Administrative tasks
+• Match task difficulty to your energy level
+
+**💡 Pro Questions to Ask:**
+• "What moves me closer to my goals?"
+• "What happens if I don't do this today?"
+• "Am I being productive or just busy?"
+
+**Want a priority assessment of your tasks?** Share your list!"""
+        
+        elif any(word in advice_topic for word in ['procrastination', 'motivation', 'stuck', 'overwhelmed']):
+            advice = """💪 **Expert Advice: Beating Procrastination & Overwhelm**
+
+**🧠 Why We Procrastinate:**
+• Task feels too big → Break it down
+• Perfectionism → Aim for "good enough" first
+• Fear of failure → Focus on learning, not perfection
+• Lack of clarity → Define the exact next step
+
+**⚡ Instant Action Techniques:**
+
+**1. The 5-Minute Rule**
+• Commit to just 5 minutes
+• Often momentum carries you forward
+• If not, you still made progress!
+
+**2. Swiss Cheese Method**
+• Poke random holes in big tasks
+• Do any small part that appeals to you
+• Gradually the task becomes manageable
+
+**3. Implementation Intention**
+• "When X happens, I will do Y"
+• "When I sit at my desk, I will open my task list"
+• "When I feel overwhelmed, I will write down 3 tasks"
+
+**🛠️ Overwhelm Busters:**
+
+**Brain Dump Technique:**
+1. Write EVERYTHING down (10 minutes)
+2. Categorize: Must do, Should do, Could do
+3. Pick ONE from "Must do"
+4. Ignore the rest until #3 is done
+
+**The NOT-To-Do List:**
+• List things you'll STOP doing
+• Often more powerful than adding tasks
+• Examples: Check email less, say no to meetings
+
+**🎯 Mindset Shifts:**
+• "I have to" → "I choose to"
+• "This is hard" → "This will help me grow"
+• "I'm behind" → "I'm exactly where I need to be"
+
+**Feeling stuck on something specific?** Tell me about it!"""
+        
+        elif any(word in advice_topic for word in ['habit', 'routine', 'consistency', 'daily']):
+            advice = """🔄 **Expert Advice: Building Bulletproof Habits**
+
+**🧱 The Habit Stack Formula:**
+
+**After [EXISTING HABIT], I will [NEW HABIT]**
+• After I pour coffee, I'll review my daily tasks
+• After I sit at my desk, I'll write down my top 3 priorities
+• After I brush my teeth, I'll plan tomorrow's schedule
+
+**📈 The 1% Better Principle:**
+• Don't aim for perfection, aim for consistency
+• Small improvements compound exponentially
+• Better to do 5 minutes daily than 1 hour weekly
+
+**🎯 Habit Design Rules:**
+
+**1. Start Stupidly Small** 🐣
+• Want to exercise? → Start with 1 push-up
+• Want to read? → Start with 1 page
+• Want to meditate? → Start with 1 breath
+
+**2. Make it Obvious** 👀
+• Put your task list where you'll see it
+• Set visual reminders
+• Use your phone wallpaper as a cue
+
+**3. Make it Attractive** ✨
+• Pair habits with things you enjoy
+• "After I complete my daily tasks, I can have coffee"
+• Celebrate small wins immediately
+
+**4. Make it Easy** ⚡
+• Reduce friction to starting
+• Prepare everything the night before
+• Use the 2-minute rule
+
+**🔗 Keystone Habits** (These trigger other good habits):
+• Morning routine → Sets up whole day
+• Exercise → Improves energy for everything
+• Daily planning → Increases productivity
+• Evening review → Prepares next day
+
+**📊 Tracking Success:**
+• Track the behavior, not just the outcome
+• Use a simple "X" on a calendar
+• Never miss twice in a row
+• Focus on consistency over perfection
+
+**Ready to build a habit?** What area of your life needs consistency?"""
+        
+        elif any(word in advice_topic for word in ['goal', 'achieve', 'success', 'plan']):
+            advice = """🎯 **Expert Advice: Goal Achievement Mastery**
+
+**🏗️ The SMART-ER Goals Framework:**
+
+**SMART:**
+• **S**pecific: Clear and well-defined
+• **M**easurable: Trackable progress
+• **A**chievable: Realistic given resources
+• **R**elevant: Aligned with your values
+• **T**ime-bound: Has a deadline
+
+**ER (The game-changers):**
+• **E**valuate: Regular progress reviews
+• **R**eadjust: Adapt based on what you learn
+
+**🎨 Goal Visualization Technique:**
+1. **Outcome Goals** → "Lose 20 pounds"
+2. **Process Goals** → "Exercise 4x/week"
+3. **Identity Goals** → "Become a healthy person"
+
+**Focus most on Process + Identity!**
+
+**⚡ The Goal Pyramid:**
+```
+     🏆 Outcome Goal (What)
+    🎯🎯 Process Goals (How)
+   📋📋📋 Daily Actions (When)
+  ⚡⚡⚡⚡ Habits (Automatic)
+```
+
+**🔄 Monthly Goal Review Questions:**
+• What's working well?
+• What obstacles did I hit?
+• What do I need to adjust?
+• What support do I need?
+• Am I still excited about this goal?
+
+**📈 Success Accelerators:**
+
+**1. Implementation Intentions**
+• "I will [BEHAVIOR] at [TIME] in [LOCATION]"
+• "I will work on my goal at 9 AM in my home office"
+
+**2. If-Then Planning**
+• "If X happens, then I will do Y"
+• "If I feel unmotivated, then I'll do just 5 minutes"
+
+**3. Social Accountability**
+• Tell someone your goal
+• Regular check-ins
+• Join communities with similar goals
+
+**4. Environment Design**
+• Make success easier
+• Remove barriers and distractions
+• Set up visual reminders
+
+**🚀 Quick Start Protocol:**
+1. Write your goal in present tense: "I am..."
+2. Identify the first 3 actions needed
+3. Schedule them in your calendar
+4. Set up your environment for success
+5. Track daily progress
+
+**What goal are you working toward?** Let's break it down together!"""
+        
+        else:
+            # General productivity advice
+            advice = """🎯 **Expert Productivity Consultation**
+
+**🚀 Core Principles of High Performance:**
+
+**1. Focus on Systems, Not Goals** 📈
+• Goals are what you want to achieve
+• Systems are what you do daily
+• Example: Don't just want "6-pack abs", build a "daily exercise system"
+
+**2. The Power of Constraint** ⚡
+• Limitation breeds creativity
+• Too many options = decision paralysis
+• Pick 3 priorities max per day
+
+**3. Energy Management > Time Management** 🔋
+• Match high-energy to important tasks
+• Protect your peak performance hours
+• Take breaks before you need them
+
+**4. Progress Compounds** 📊
+• 1% better daily = 37x better in a year
+• Consistency beats intensity
+• Small improvements add up exponentially
+
+**🛠️ Advanced Productivity Strategies:**
+
+**Time Blocking** 📅
+• Assign specific times to specific tasks
+• Include buffer time for unexpected items
+• Block time for both work and rest
+
+**The Two-List Strategy (Buffett's Method)** 📝
+1. List your top 25 goals/tasks
+2. Circle your top 5 most important
+3. The other 20? Avoid at all costs until top 5 are done
+
+**Pareto Principle (80/20 Rule)** ⚡
+• 80% of results come from 20% of efforts
+• Identify your high-impact activities
+• Double down on what works
+
+**🎯 Questions for Reflection:**
+• What would make the biggest difference in my life?
+• What am I avoiding that I know I should do?
+• What would I do if I had unlimited confidence?
+• How can I make this easier for myself?
+
+**🔥 Ready for Specific Advice?**
+Tell me about:
+• Your biggest challenge right now
+• A goal you're working toward
+• An area where you feel stuck
+• What success looks like for you
+
+I'll give you targeted strategies!"""
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        
+        # Log the expert consultation
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="expert_advice",
+            entity_type="consultation",
+            action_details={
+                "advice_topic": advice_topic,
+                "consultation_type": "productivity_expert",
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        return {
+            "status": "ok",
+            "message": advice
+        }
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="expert_advice",
+            entity_type="consultation",
+            action_details={"execution_time_ms": execution_time_ms},
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {"status": "error", "message": f"I had trouble providing expert advice: {error_msg}"}
+
 # --- The Master Dictionary of All Available Tools ---
 AVAILABLE_TOOLS = {
     # Tasks
@@ -2171,6 +2783,8 @@ AVAILABLE_TOOLS = {
     "task_for_day": task_for_day, "summary_of_day": summary_of_day, "ai_action_helper": ai_action_helper,
     # Silent Mode Tools
     "activate_silent_mode": activate_silent_mode, "deactivate_silent_mode": deactivate_silent_mode, "get_silent_status": get_silent_status,
+    # AI Interaction Features
+    "guide": guide_tool, "chat": chat_tool, "expert": expert_tool,
 }
 
 
