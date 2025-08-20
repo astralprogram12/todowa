@@ -88,26 +88,56 @@ def _log_action_with_timing(supabase, user_id, action_type, entity_type, entity_
 # ai_tools.py
 
 def add_task(supabase, user_id, **kwargs):
-    """Adds a new task."""
+    """Adds a new task with mandatory category assignment and smart category management."""
     start_time = time.time()
     
     try:
-        # FIX: Process list name and convert all keys to snake_case
+        # Extract title for validation
+        title = kwargs.get('title')
+        if not title:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="add_task",
+                entity_type="task",
+                action_details={"execution_time_ms": execution_time_ms},
+                success_status=False,
+                error_details="Task title is required"
+            )
+            return {"status": "error", "message": "Task title is required."}
+        
+        # MANDATORY CATEGORY PROCESSING
+        category_input = kwargs.get('category')
+        notes = kwargs.get('notes')
+        
+        # Process category with prioritization logic
+        category_result = validate_and_process_category(
+            supabase=supabase,
+            user_id=user_id,
+            category_input=category_input,
+            task_title=title,
+            task_notes=notes
+        )
+        
+        # Update kwargs with processed category
+        kwargs['category'] = category_result['category']
+        
+        # Process list name and convert all keys to snake_case
         processed_kwargs = _process_list_name(supabase, user_id, kwargs)
         snake_case_args = _convert_keys_to_snake_case(processed_kwargs)
 
-        # --- START CORRECTION ---
-        # Standardize the 'difficulty' field to lowercase to match the database constraint.
+        # Standardize the 'difficulty' field to lowercase to match the database constraint
         if 'difficulty' in snake_case_args and isinstance(snake_case_args.get('difficulty'), str):
             snake_case_args['difficulty'] = snake_case_args['difficulty'].lower()
-        # --- END CORRECTION ---
         
+        # Create the task
         result = database_personal.add_task_entry(supabase, user_id, **snake_case_args)
         task_id = result.get('id') if result else None
         
         execution_time_ms = int((time.time() - start_time) * 1000)
         
-        # Log successful action
+        # Log successful action with category information
         _log_action_with_timing(
             supabase=supabase,
             user_id=user_id,
@@ -115,14 +145,26 @@ def add_task(supabase, user_id, **kwargs):
             entity_type="task",
             entity_id=task_id,
             action_details={
-                "title": kwargs.get('title'),
+                "title": title,
+                "category": category_result['category'],
+                "category_status": category_result['status'],
+                "category_message": category_result['message'],
                 "parameters": snake_case_args,
                 "execution_time_ms": execution_time_ms
             },
             success_status=True
         )
         
-        return {"status": "ok", "message": f"I've added the task: '{kwargs.get('title')}'."}
+        # Enhanced success message with category information
+        success_message = f"I've added the task: '{title}'."
+        if category_result['status'] in ['auto_suggested', 'existing_partial_match', 'new_category']:
+            success_message += f" {category_result['message']}"
+        
+        return {
+            "status": "ok", 
+            "message": success_message,
+            "category_info": category_result
+        }
         
     except Exception as e:
         execution_time_ms = int((time.time() - start_time) * 1000)
@@ -2309,6 +2351,66 @@ def accumulate_silent_action(supabase, user_id, action_type, action_details):
         print(f"!!! ERROR in accumulate_silent_action: {e}")
         return False
 
+def handle_silent_mode(supabase, user_id, user_input, **kwargs):
+    """Intelligently handles silent mode requests - activation, deactivation, or status checking."""
+    start_time = time.time()
+    
+    try:
+        input_lower = user_input.lower().strip()
+        
+        # Check for deactivation patterns
+        deactivation_patterns = [
+            r"\b(exit|end|stop|deactivate|turn\s+off)\s+silent",
+            r"\b(back\s+online|resume\s+replies?)"
+        ]
+        
+        for pattern in deactivation_patterns:
+            if re.search(pattern, input_lower):
+                return deactivate_silent_mode(supabase, user_id, **kwargs)
+        
+        # Check for status checking patterns
+        status_patterns = [
+            r"\b(silent\s+status|am\s+i\s+silent|in\s+silent\s+mode)",
+            r"\b(silent\s+mode\s+status|check\s+silent)"
+        ]
+        
+        for pattern in status_patterns:
+            if re.search(pattern, input_lower):
+                return get_silent_status(supabase, user_id, **kwargs)
+        
+        # Default to activation if none of the above matched
+        # Extract duration if specified
+        duration_match = re.search(r"\b(\d+)\s+(hour|hours|minute|minutes?|mins?)\b", input_lower)
+        if duration_match:
+            duration_value = int(duration_match.group(1))
+            duration_unit = duration_match.group(2)
+            
+            if 'hour' in duration_unit:
+                kwargs['duration_minutes'] = duration_value * 60
+            else:  # minutes
+                kwargs['duration_minutes'] = duration_value
+        
+        return activate_silent_mode(supabase, user_id, **kwargs)
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="handle_silent_mode",
+            entity_type="silent_session",
+            action_details={
+                "user_input": user_input,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {"status": "error", "message": f"Failed to handle silent mode request: {error_msg}"}
+
 def check_and_end_expired_silent_sessions(supabase):
     """Checks for and ends expired silent sessions. Used by scheduler."""
     try:
@@ -3136,8 +3238,798 @@ def ai_confusion_helper(supabase, user_id, content_description, user_input=None,
             }
         }
 
+# === CATEGORY MANAGEMENT SYSTEM ===
+# Enhanced category management with existing category prioritization
+
+def get_existing_categories(supabase, user_id, limit=50):
+    """Retrieve all existing categories used by the user, sorted by frequency."""
+    start_time = time.time()
+    
+    try:
+        # Query all tasks to get category usage statistics
+        tasks = database_personal.query_tasks(supabase, user_id, completed=False, limit=1000)
+        
+        if not tasks:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="get_existing_categories",
+                entity_type="utility",
+                action_details={"execution_time_ms": execution_time_ms, "categories_found": 0},
+                success_status=True
+            )
+            return []
+        
+        # Count category usage frequency
+        category_counts = {}
+        for task in tasks:
+            category = task.get('category')
+            if category and category.strip():
+                category = category.strip().lower()
+                category_counts[category] = category_counts.get(category, 0) + 1
+        
+        # Sort by frequency (most used first)
+        sorted_categories = sorted(category_counts.items(), key=lambda x: x[1], reverse=True)
+        categories = [cat[0] for cat in sorted_categories[:limit]]
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="get_existing_categories",
+            entity_type="utility",
+            action_details={
+                "execution_time_ms": execution_time_ms,
+                "categories_found": len(categories),
+                "top_categories": categories[:5]
+            },
+            success_status=True
+        )
+        
+        return categories
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="get_existing_categories",
+            entity_type="utility",
+            action_details={"execution_time_ms": execution_time_ms},
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return []
+
+
+def _calculate_category_match_score(content, category):
+    """Calculate how well a category matches the task content (0.0 to 1.0)."""
+    content = content.lower()
+    category = category.lower()
+    
+    # Direct category name match
+    if category in content:
+        return 1.0
+    
+    # Define category keyword mappings
+    category_keywords = {
+        'work': ['work', 'job', 'office', 'project', 'task', 'deadline', 'meeting', 'team', 'client', 'business'],
+        'personal': ['personal', 'family', 'home', 'house', 'self', 'me', 'my'],
+        'health': ['health', 'doctor', 'medical', 'appointment', 'exercise', 'gym', 'workout', 'medicine'],
+        'finance': ['money', 'pay', 'bill', 'budget', 'bank', 'finance', 'expense', 'invoice', 'payment'],
+        'shopping': ['buy', 'shop', 'store', 'purchase', 'grocery', 'market', 'mall'],
+        'travel': ['travel', 'trip', 'vacation', 'flight', 'hotel', 'book', 'ticket'],
+        'social': ['friend', 'social', 'party', 'event', 'dinner', 'lunch', 'meet'],
+        'learning': ['learn', 'study', 'read', 'book', 'course', 'education', 'training'],
+        'maintenance': ['fix', 'repair', 'clean', 'maintain', 'service', 'replace'],
+        'creative': ['create', 'design', 'art', 'write', 'blog', 'creative', 'draw'],
+        'communication': ['call', 'email', 'message', 'contact', 'reach out', 'follow up'],
+        'planning': ['plan', 'organize', 'schedule', 'prepare', 'arrange', 'setup']
+    }
+    
+    # Check if this category has keyword mappings
+    keywords = category_keywords.get(category, [category])
+    
+    # Calculate match score based on keyword presence
+    matches = sum(1 for keyword in keywords if keyword in content)
+    if matches > 0:
+        return min(0.8, matches * 0.3)  # Max 0.8 for keyword matches
+    
+    # Partial string matching
+    if any(part in content for part in category.split()):
+        return 0.4
+    
+    return 0.0
+
+
+def _infer_category_from_content(title, notes=None):
+    """Infer an appropriate category name from task content."""
+    content = f"{title} {notes or ''}".lower()
+    
+    # Category inference rules based on keywords
+    inference_rules = [
+        (['meeting', 'call', 'standup', 'sync', 'review', 'discussion'], 'work'),
+        (['doctor', 'appointment', 'medical', 'health', 'gym', 'exercise'], 'health'),
+        (['buy', 'purchase', 'shop', 'store', 'grocery', 'market'], 'shopping'),
+        (['pay', 'bill', 'invoice', 'budget', 'bank', 'finance'], 'finance'),
+        (['clean', 'fix', 'repair', 'maintain', 'service'], 'maintenance'),
+        (['travel', 'trip', 'vacation', 'flight', 'hotel', 'book'], 'travel'),
+        (['learn', 'study', 'read', 'course', 'training', 'education'], 'learning'),
+        (['family', 'home', 'house', 'personal'], 'personal'),
+        (['create', 'design', 'write', 'blog', 'art', 'creative'], 'creative'),
+        (['email', 'message', 'contact', 'follow up', 'reach out'], 'communication'),
+        (['plan', 'organize', 'schedule', 'prepare', 'arrange'], 'planning'),
+        (['friend', 'social', 'party', 'event', 'dinner', 'lunch'], 'social')
+    ]
+    
+    # Find best matching category
+    for keywords, category in inference_rules:
+        if any(keyword in content for keyword in keywords):
+            return category
+    
+    # Default fallback
+    return 'general'
+
+
+def suggest_best_category(supabase, user_id, task_title, task_notes=None, existing_categories=None):
+    """Suggest the best matching existing category for a task, or recommend creating a new one."""
+    start_time = time.time()
+    
+    try:
+        # Get existing categories if not provided
+        if existing_categories is None:
+            existing_categories = get_existing_categories(supabase, user_id)
+        
+        if not existing_categories:
+            # No existing categories - will need to create a new one
+            suggested_category = _infer_category_from_content(task_title, task_notes)
+            
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="suggest_best_category",
+                entity_type="utility",
+                action_details={
+                    "task_title": task_title,
+                    "suggested_category": suggested_category,
+                    "match_type": "new_inferred",
+                    "execution_time_ms": execution_time_ms
+                },
+                success_status=True
+            )
+            
+            return {
+                "status": "suggest_new",
+                "suggested_category": suggested_category,
+                "match_confidence": "medium",
+                "existing_matches": [],
+                "reasoning": f"Inferred '{suggested_category}' from task content. No existing categories found."
+            }
+        
+        # Analyze task content
+        content_to_analyze = f"{task_title} {task_notes or ''}".lower()
+        
+        # Score existing categories against task content
+        category_scores = []
+        for category in existing_categories:
+            score = _calculate_category_match_score(content_to_analyze, category)
+            if score > 0:
+                category_scores.append((category, score))
+        
+        # Sort by score
+        category_scores.sort(key=lambda x: x[1], reverse=True)
+        
+        # Determine best recommendation
+        if category_scores and category_scores[0][1] >= 0.6:  # High confidence match
+            best_match = category_scores[0][0]
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="suggest_best_category",
+                entity_type="utility",
+                action_details={
+                    "task_title": task_title,
+                    "suggested_category": best_match,
+                    "match_type": "existing_high_confidence",
+                    "match_score": category_scores[0][1],
+                    "execution_time_ms": execution_time_ms
+                },
+                success_status=True
+            )
+            
+            return {
+                "status": "existing_match",
+                "suggested_category": best_match,
+                "match_confidence": "high",
+                "existing_matches": [cat[0] for cat in category_scores[:3]],
+                "reasoning": f"Strong match with existing '{best_match}' category based on task content."
+            }
+            
+        elif category_scores and category_scores[0][1] >= 0.3:  # Medium confidence match
+            best_match = category_scores[0][0]
+            alternatives = [cat[0] for cat in category_scores[:3]]
+            
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="suggest_best_category",
+                entity_type="utility",
+                action_details={
+                    "task_title": task_title,
+                    "suggested_category": best_match,
+                    "match_type": "existing_medium_confidence",
+                    "match_score": category_scores[0][1],
+                    "alternatives": alternatives,
+                    "execution_time_ms": execution_time_ms
+                },
+                success_status=True
+            )
+            
+            return {
+                "status": "existing_match",
+                "suggested_category": best_match,
+                "match_confidence": "medium",
+                "existing_matches": alternatives,
+                "reasoning": f"Possible match with '{best_match}'. Consider alternatives: {', '.join(alternatives[:2])}."
+            }
+        
+        else:  # No good matches - suggest creating new category
+            suggested_category = _infer_category_from_content(task_title, task_notes)
+            top_existing = [cat[0] for cat in category_scores[:3]] if category_scores else existing_categories[:3]
+            
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="suggest_best_category",
+                entity_type="utility",
+                action_details={
+                    "task_title": task_title,
+                    "suggested_category": suggested_category,
+                    "match_type": "new_inferred_no_good_match",
+                    "existing_options": top_existing,
+                    "execution_time_ms": execution_time_ms
+                },
+                success_status=True
+            )
+            
+            return {
+                "status": "suggest_new",
+                "suggested_category": suggested_category,
+                "match_confidence": "low",
+                "existing_matches": top_existing,
+                "reasoning": f"No strong match found. Suggest new category '{suggested_category}' or choose from existing: {', '.join(top_existing[:2])}."
+            }
+            
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="suggest_best_category",
+            entity_type="utility",
+            action_details={
+                "task_title": task_title,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        # Fallback - infer from content
+        fallback_category = _infer_category_from_content(task_title, task_notes)
+        return {
+            "status": "error_fallback",
+            "suggested_category": fallback_category,
+            "match_confidence": "low",
+            "existing_matches": [],
+            "reasoning": f"Error occurred during analysis. Fallback suggestion: '{fallback_category}'."
+        }
+
+
+def validate_and_process_category(supabase, user_id, category_input, task_title, task_notes=None):
+    """Validate a category input and return the final category to use.
+    
+    This function prioritizes existing categories and handles category creation.
+    """
+    start_time = time.time()
+    
+    try:
+        # If no category provided, suggest one
+        if not category_input or not category_input.strip():
+            suggestion = suggest_best_category(supabase, user_id, task_title, task_notes)
+            
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="validate_and_process_category",
+                entity_type="utility",
+                action_details={
+                    "task_title": task_title,
+                    "category_input": "empty",
+                    "suggestion_status": suggestion["status"],
+                    "final_category": suggestion["suggested_category"],
+                    "execution_time_ms": execution_time_ms
+                },
+                success_status=True
+            )
+            
+            return {
+                "status": "auto_suggested",
+                "category": suggestion["suggested_category"],
+                "suggestion_info": suggestion,
+                "message": f"Auto-assigned category '{suggestion['suggested_category']}' based on task content."
+            }
+        
+        # Clean and normalize input
+        category_input = category_input.strip().lower()
+        
+        # Get existing categories
+        existing_categories = get_existing_categories(supabase, user_id)
+        
+        # Check for exact match with existing category
+        for existing_cat in existing_categories:
+            if existing_cat.lower() == category_input:
+                execution_time_ms = int((time.time() - start_time) * 1000)
+                _log_action_with_timing(
+                    supabase=supabase,
+                    user_id=user_id,
+                    action_type="validate_and_process_category",
+                    entity_type="utility",
+                    action_details={
+                        "task_title": task_title,
+                        "category_input": category_input,
+                        "final_category": existing_cat,
+                        "match_type": "exact_existing",
+                        "execution_time_ms": execution_time_ms
+                    },
+                    success_status=True
+                )
+                
+                return {
+                    "status": "existing_match",
+                    "category": existing_cat,
+                    "message": f"Using existing category '{existing_cat}'."
+                }
+        
+        # Check for partial matches with existing categories
+        partial_matches = []
+        for existing_cat in existing_categories:
+            if (category_input in existing_cat.lower() or 
+                existing_cat.lower() in category_input or
+                _calculate_category_match_score(category_input, existing_cat) > 0.5):
+                partial_matches.append(existing_cat)
+        
+        if partial_matches:
+            # Use the first (most frequently used) partial match
+            best_match = partial_matches[0]
+            
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            _log_action_with_timing(
+                supabase=supabase,
+                user_id=user_id,
+                action_type="validate_and_process_category",
+                entity_type="utility",
+                action_details={
+                    "task_title": task_title,
+                    "category_input": category_input,
+                    "final_category": best_match,
+                    "match_type": "partial_existing",
+                    "partial_matches": partial_matches,
+                    "execution_time_ms": execution_time_ms
+                },
+                success_status=True
+            )
+            
+            return {
+                "status": "existing_partial_match",
+                "category": best_match,
+                "alternatives": partial_matches,
+                "message": f"Using similar existing category '{best_match}' (matches '{category_input}')."
+            }
+        
+        # No existing match - create new category
+        # Capitalize properly for consistency
+        new_category = category_input.title()
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="validate_and_process_category",
+            entity_type="utility",
+            action_details={
+                "task_title": task_title,
+                "category_input": category_input,
+                "final_category": new_category,
+                "match_type": "new_category",
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        return {
+            "status": "new_category",
+            "category": new_category,
+            "message": f"Created new category '{new_category}'."
+        }
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="validate_and_process_category",
+            entity_type="utility",
+            action_details={
+                "task_title": task_title,
+                "category_input": category_input,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        # Fallback to inferred category
+        fallback_category = _infer_category_from_content(task_title, task_notes)
+        return {
+            "status": "error_fallback",
+            "category": fallback_category,
+            "message": f"Error processing category. Using fallback: '{fallback_category}'."
+        }
+
+
+def list_user_categories(supabase, user_id, limit=20):
+    """List all categories used by the user, sorted by frequency."""
+    start_time = time.time()
+    
+    try:
+        categories = get_existing_categories(supabase, user_id, limit)
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="list_user_categories",
+            entity_type="utility",
+            action_details={
+                "categories_count": len(categories),
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        if not categories:
+            return {"status": "ok", "message": "No categories found. Categories will be created automatically when you add tasks.", "categories": []}
+        
+        category_list = ', '.join(categories[:10])  # Show top 10
+        message = f"Your categories (by usage): {category_list}"
+        if len(categories) > 10:
+            message += f" and {len(categories) - 10} more."
+        
+        return {
+            "status": "ok",
+            "message": message,
+            "categories": categories
+        }
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="list_user_categories",
+            entity_type="utility",
+            action_details={"execution_time_ms": execution_time_ms},
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {"status": "error", "message": f"Failed to list categories: {error_msg}"}
+
+# --- INTELLIGENT CONTEXT CLASSIFIER (Central Decision Tree Orchestrator) ---
+
+def intelligent_context_classifier(supabase, user_id, user_input, conversation_context=None):
+    """
+    The central orchestrating function that implements the intelligent decision tree logic.
+    Analyzes user input and routes to the appropriate function based on intent classification.
+    
+    Returns a classification result with recommended action and confidence score.
+    """
+    start_time = time.time()
+    
+    try:
+        if not user_input:
+            return {
+                "status": "error",
+                "message": "No input provided for classification",
+                "classification": "unknown",
+                "confidence": 0.0
+            }
+        
+        # Normalize input for analysis
+        input_lower = user_input.lower().strip()
+        context_lower = (conversation_context or "").lower()
+        full_text = f"{input_lower} {context_lower}"
+        
+        # Initialize classification scores
+        classification_scores = {
+            "task": 0.0,
+            "reminder": 0.0,
+            "memory": 0.0,
+            "journal": 0.0,
+            "guide": 0.0,
+            "expert": 0.0,
+            "chat": 0.0,
+            "ai_action": 0.0,
+            "silent": 0.0
+        }
+        
+        # DECISION TREE BRANCH 1: COMMAND/PREFERENCE DETECTION → MEMORIES (HIGHEST PRIORITY)
+        memory_patterns = [
+            # Behavioral commands (high priority)
+            r"\b(never|always|don't)\s+(ask|remind|tell|show|do)",
+            r"\b(remember|note)\s+(that\s+)?i\s+(prefer|like|hate|want)",
+            r"\bmy\s+(preference|style|way)\b",
+            r"\bfrom\s+now\s+on\b",
+            r"\b(whenever|every\s+time)\s+i\b",
+            # Personal information
+            r"\bi\s+(am|live|work|prefer|like|hate)\b",
+            r"\bmy\s+(name|email|phone|address|favorite)\b",
+            # Instructions and rules  
+            r"\b(when\s+i\s+say|if\s+i\s+say|make\s+sure)\b",
+            r"\b(rule|instruction|guideline)\b",
+            # Strong behavioral indicators
+            r"\bjust\s+(do|tell|show)\b",
+            r"\balways\s+(remember|do|make|ensure)\b"
+        ]
+        
+        for pattern in memory_patterns:
+            if re.search(pattern, full_text):
+                classification_scores["memory"] += 0.5  # Increased weight for memory
+        
+        # Boost memory score for explicit memory keywords
+        memory_keywords = ["remember", "note", "preference", "always", "never", "my", "i am", "i like", "i hate"]
+        memory_score = sum(0.2 for keyword in memory_keywords if keyword in full_text)  # Increased weight
+        classification_scores["memory"] += memory_score
+        
+        # DECISION TREE BRANCH 2: SILENT MODE DETECTION → ACTIVATE/DEACTIVATE SILENT MODE (HIGH PRIORITY)
+        silent_patterns = [
+            # Silent mode activation
+            r"\b(go\s+silent|activate\s+silent|turn\s+on\s+silent)\b",
+            r"\b(silent\s+mode|quiet\s+mode)\b",
+            r"\b(don't\s+reply|stop\s+replying|no\s+replies?)\b",
+            r"\b(silent\s+for|quiet\s+for)\b",
+            # Silent mode deactivation
+            r"\b(exit\s+silent|end\s+silent|stop\s+silent)\b",
+            r"\b(deactivate\s+silent|turn\s+off\s+silent)\b",
+            r"\b(back\s+online|resume\s+replies?)\b",
+            # Silent mode status
+            r"\b(silent\s+status|am\s+i\s+silent|in\s+silent\s+mode)\b",
+            r"\b(silent\s+mode\s+status)\b"
+        ]
+        
+        for pattern in silent_patterns:
+            if re.search(pattern, full_text):
+                classification_scores["silent"] += 0.7  # High priority for silent mode
+        
+        # Boost silent score for explicit silent keywords
+        silent_keywords = ["silent", "quiet", "don't reply", "stop replying", "no replies"]
+        silent_score = sum(0.3 for keyword in silent_keywords if keyword in full_text)
+        classification_scores["silent"] += silent_score
+        
+        # DECISION TREE BRANCH 3: GENERAL KNOWLEDGE DETECTION → JOURNAL
+        journal_patterns = [
+            r"\bi\s+(learned|discovered|found\s+out|read)\s+(that)?\b",
+            r"\b(did\s+you\s+know|fun\s+fact|interesting)\b",
+            r"\b(today\s+i|yesterday\s+i|this\s+week\s+i)\b",
+            r"\b(meeting\s+notes|research\s+shows|study\s+found)\b",
+            r"\b(brainstorming|idea|concept|thought)\b"
+        ]
+        
+        for pattern in journal_patterns:
+            if re.search(pattern, full_text):
+                classification_scores["journal"] += 0.3
+        
+        journal_keywords = ["learned", "discovered", "fact", "research", "study", "meeting", "idea", "thought"]
+        journal_score = sum(0.15 for keyword in journal_keywords if keyword in full_text)
+        classification_scores["journal"] += journal_score
+        
+        # DECISION TREE BRANCH 4: RECURRING ACTION DETECTION → AI ACTIONS (HIGH PRIORITY)
+        ai_action_patterns = [
+            r"\b(every|daily|weekly|monthly|each)\s+(day|week|month|morning|evening)\b",
+            r"\b(recurring|repeat|schedule|automat)\b",
+            r"\b(every\s+\d+\s+(days|weeks|months))\b",
+            r"\b(daily\s+reminder|weekly\s+summary)\b",
+            # Specific recurring reminder patterns
+            r"\bevery\s+\w+\s+(morning|evening|afternoon).*remind\b",
+            r"\b(daily|weekly|monthly).*remind\b"
+        ]
+        
+        for pattern in ai_action_patterns:
+            if re.search(pattern, full_text):
+                classification_scores["ai_action"] += 0.6  # Higher weight for AI actions
+        
+        # DECISION TREE BRANCH 5: REMINDER DETECTION → SET REMINDERS 
+        # Note: This comes AFTER ai_action to avoid conflicts
+        reminder_patterns = [
+            r"\b(remind|alert|notify)\s+me\b",
+            r"\b(at|on|by|before|after)\s+\d",
+            r"\b(tomorrow|today|next\s+week|monday|tuesday|wednesday|thursday|friday)\b",
+            r"\b(meeting|appointment|call|deadline)\b",
+            r"\b(in\s+\d+\s+(minutes|hours|days))\b"
+        ]
+        
+        # Only apply reminder patterns if AI action score is low
+        if classification_scores["ai_action"] < 0.3:
+            for pattern in reminder_patterns:
+                if re.search(pattern, full_text):
+                    classification_scores["reminder"] += 0.4
+        else:
+            # Reduce reminder score when AI action is detected
+            for pattern in reminder_patterns:
+                if re.search(pattern, full_text):
+                    classification_scores["reminder"] += 0.2  # Lower weight when AI action present
+        
+        # DECISION TREE BRANCH 6: TASK DETECTION → ADD TASK
+        task_patterns = [
+            r"\b(add\s+task|create\s+task|new\s+task)\b",
+            r"\b(i\s+need\s+to|i\s+have\s+to|i\s+should|i\s+must)\b",
+            r"\b(do|complete|finish|work\s+on)\b",
+            r"\b(todo|to-do|task)\b",
+            r"\b(project|assignment|deadline)\b"
+        ]
+        
+        for pattern in task_patterns:
+            if re.search(pattern, full_text):
+                classification_scores["task"] += 0.3
+        
+        # DECISION TREE BRANCH 7: GUIDE MODE DETECTION
+        guide_patterns = [
+            r"\b(how\s+do\s+i|help\s+me|i\s+don't\s+know)\b",
+            r"\b(what\s+can\s+you\s+do|how\s+does\s+this\s+work)\b",
+            r"\b(explain|show\s+me|teach\s+me)\b",
+            r"\b(confused|lost|new\s+user)\b"
+        ]
+        
+        for pattern in guide_patterns:
+            if re.search(pattern, full_text):
+                classification_scores["guide"] += 0.4
+        
+        # DECISION TREE BRANCH 8: EXPERT MODE DETECTION
+        expert_patterns = [
+            r"\b(what's\s+the\s+best\s+way|how\s+should\s+i|any\s+tips)\b",
+            r"\b(advice|strategy|recommend)\b",
+            r"\b(productive|organize|prioritize|focus)\b",
+            r"\b(goal|achievement|success)\b"
+        ]
+        
+        for pattern in expert_patterns:
+            if re.search(pattern, full_text):
+                classification_scores["expert"] += 0.4
+        
+        # DECISION TREE BRANCH 9: CHAT MODE DETECTION
+        chat_patterns = [
+            r"\b(hello|hi|hey|good\s+morning|good\s+afternoon)\b",
+            r"\b(how\s+are\s+you|what's\s+up|thank\s+you|thanks)\b",
+            r"\b(test|testing|check|random)\b",
+            r"\b(joke|funny|bored|chat)\b"
+        ]
+        
+        for pattern in chat_patterns:
+            if re.search(pattern, full_text):
+                classification_scores["chat"] += 0.3
+        
+        # Calculate final classification
+        max_score = max(classification_scores.values())
+        
+        if max_score < 0.2:
+            # Very low confidence - use confusion helper
+            classification = "confusion"
+            confidence = 0.1
+            recommended_action = "ai_confusion_helper"
+        else:
+            # Find the highest scoring classification
+            classification = max(classification_scores.keys(), key=lambda k: classification_scores[k])
+            confidence = min(max_score, 1.0)  # Cap at 1.0
+            
+            # Map classification to recommended action
+            action_mapping = {
+                "task": "add_task",
+                "reminder": "set_reminder", 
+                "memory": "add_memory",
+                "journal": "add_journal",
+                "guide": "guide",
+                "expert": "expert", 
+                "chat": "chat",
+                "ai_action": "schedule_ai_action",
+                "silent": "handle_silent_mode"
+            }
+            recommended_action = action_mapping.get(classification, "chat")
+        
+        # Determine confidence level
+        if confidence >= 0.8:
+            confidence_level = "high"
+        elif confidence >= 0.6:
+            confidence_level = "medium"
+        elif confidence >= 0.4:
+            confidence_level = "low"
+        else:
+            confidence_level = "confused"
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        
+        # Log the classification
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="intelligent_context_classifier",
+            entity_type="classification",
+            action_details={
+                "user_input": user_input[:200],  # Truncate for logging
+                "classification": classification,
+                "confidence": confidence,
+                "confidence_level": confidence_level,
+                "recommended_action": recommended_action,
+                "all_scores": classification_scores,
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=True
+        )
+        
+        return {
+            "status": "ok",
+            "classification": classification,
+            "confidence": confidence,
+            "confidence_level": confidence_level,
+            "recommended_action": recommended_action,
+            "all_scores": classification_scores,
+            "user_input": user_input,
+            "reasoning": f"Classified as '{classification}' with {confidence_level} confidence ({confidence:.2f})"
+        }
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        error_msg = str(e)
+        
+        _log_action_with_timing(
+            supabase=supabase,
+            user_id=user_id,
+            action_type="intelligent_context_classifier",
+            entity_type="classification",
+            action_details={
+                "user_input": user_input[:200] if user_input else "",
+                "execution_time_ms": execution_time_ms
+            },
+            success_status=False,
+            error_details=error_msg
+        )
+        
+        return {
+            "status": "error",
+            "message": f"Classification failed: {error_msg}",
+            "classification": "unknown",
+            "confidence": 0.0
+        }
+
 # --- The Master Dictionary of All Available Tools ---
 AVAILABLE_TOOLS = {
+    # Core Decision Tree Function
+    "intelligent_context_classifier": intelligent_context_classifier,
     # Tasks
     "add_task": add_task, "update_task": update_task, "delete_task": delete_task, "complete_task": complete_task,
     # Reminders for Tasks
@@ -3152,10 +4044,13 @@ AVAILABLE_TOOLS = {
     "task_for_day": task_for_day, "summary_of_day": summary_of_day, "ai_action_helper": ai_action_helper,
     # Silent Mode Tools
     "activate_silent_mode": activate_silent_mode, "deactivate_silent_mode": deactivate_silent_mode, "get_silent_status": get_silent_status,
+    "handle_silent_mode": handle_silent_mode,
     # AI Interaction Features
     "guide": guide_tool, "chat": chat_tool, "expert": expert_tool,
     # Utility Functions
     "convert_utc_to_user_timezone": convert_utc_to_user_timezone, "ai_confusion_helper": ai_confusion_helper,
+    # Category Management
+    "list_user_categories": list_user_categories,
 }
 
 

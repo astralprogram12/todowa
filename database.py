@@ -141,6 +141,33 @@ def get_memory_context_for_ai(supabase: Client, user_id: str) -> dict:
 
 # --- Task Functions ---
 
+def get_existing_categories(supabase: Client, user_id: str, limit: int = 50):
+    """Get all existing categories for a user, ordered by usage frequency."""
+    try:
+        # Query categories ordered by frequency of use (most used first)
+        res = supabase.table('tasks').select('category').eq('user_id', user_id).neq('category', None).execute()
+        
+        if not res.data:
+            return []
+        
+        # Count category frequencies
+        category_counts = {}
+        for task in res.data:
+            category = task.get('category')
+            if category and category.strip():
+                category = category.strip()
+                category_counts[category] = category_counts.get(category, 0) + 1
+        
+        # Sort by frequency (most used first) and return just the category names
+        sorted_categories = sorted(category_counts.keys(), key=lambda x: category_counts[x], reverse=True)
+        
+        # Limit results
+        return sorted_categories[:limit]
+        
+    except Exception as e:
+        print(f"!!! DATABASE ERROR in get_existing_categories: {e}")
+        return []
+
 def add_task_entry(supabase: Client, user_id: str, **kwargs):
     kwargs['user_id'] = user_id
     res = supabase.table("tasks").insert(kwargs).execute()
