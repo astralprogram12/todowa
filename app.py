@@ -70,9 +70,17 @@ def test_list_ai_actions():
 def webhook():
     """Main webhook endpoint for processing incoming messages."""
     try:
-        data = request.json
+        # Get raw data, which could be a dict or a string
+        data = request.get_json(silent=True) or request.get_data(as_text=True)
+
+        # If data is a string, it needs to be parsed into a dictionary
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except json.JSONDecodeError:
+                return jsonify({"error": "Invalid JSON format received"}), 400
         
-        # Extract user ID and message text from the incoming webhook
+        # Now, data is guaranteed to be a dictionary (or an error was returned)
         user_id = data.get('user_id')
         message_text = data.get('message', {}).get('text', '')
         
