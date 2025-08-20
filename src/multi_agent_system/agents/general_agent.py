@@ -27,7 +27,7 @@ class GeneralAgent(BaseAgent):
                 "09_intelligent_decision_tree.md"
             ]
             
-            system_prompt = await self._load_prompts(prompt_files)
+            system_prompt = await self.load_prompts(prompt_files)
             
             # Add routing info to context if available
             enhanced_context = context.copy()
