@@ -1,5 +1,30 @@
 # SILENT MODE SYSTEM
 
+## INTEGRATION WITH DECISION TREE
+
+**Classification Priority:** Silent mode is **Branch 2** in the intelligent decision tree (HIGH PRIORITY)
+
+**Smart Routing Function:** `handle_silent_mode` automatically determines intent:
+- **Activation patterns** → routes to `activate_silent_mode`
+- **Deactivation patterns** → routes to `deactivate_silent_mode`  
+- **Status patterns** → routes to `get_silent_status`
+- **Duration extraction** → automatically parses time from user input
+
+**Detection Patterns:**
+```regex
+# Activation
+\b(go\s+silent|activate\s+silent|turn\s+on\s+silent)\b
+\b(silent\s+mode|quiet\s+mode)\b
+\b(don't\s+reply|stop\s+replying|no\s+replies?)\b
+
+# Deactivation  
+\b(exit\s+silent|end\s+silent|stop\s+silent)\b
+\b(back\s+online|resume\s+replies?)\b
+
+# Status
+\b(silent\s+status|am\s+i\s+silent|in\s+silent\s+mode)\b
+```
+
 ## Commands Recognition
 
 ### Activation Commands
@@ -39,7 +64,13 @@
 ## Silent Mode Actions
 
 ```json
-// Activation
+// Smart Routing (RECOMMENDED - handles all silent mode operations)
+{
+  "type": "handle_silent_mode",
+  "user_input": "string"  // Automatically detects intent and routes appropriately
+}
+
+// Direct Actions (for specific operations)
 {
   "type": "activate_silent_mode",
   "duration_minutes": 60,
@@ -53,6 +84,12 @@
 // Status Check
 {"type": "get_silent_status"}
 ```
+
+**Usage Recommendation:** Use `handle_silent_mode` for all user-initiated silent mode requests as it automatically:
+- Detects activation/deactivation/status intent
+- Extracts duration from natural language
+- Routes to appropriate function
+- Handles edge cases and validation
 
 ## Context Integration
 

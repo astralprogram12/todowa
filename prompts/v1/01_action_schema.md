@@ -4,9 +4,10 @@
 ```json
 {
   "type": "classification",
-  "label": "task|reminder|memory|journal|guide|chat|expert",
+  "label": "task|reminder|memory|journal|guide|chat|expert|ai_action|silent",
   "confidence": 0.0,
-  "precedence_note": "user > explicit context > stored memory > inference"
+  "precedence_note": "user > explicit context > stored memory > inference",
+  "decision_tree_branch": "1-9 corresponding to: memory, silent, journal, ai_action, reminder, task, guide, expert, chat"
 }
 ```
 
@@ -103,7 +104,15 @@
 { "type": "delete_journal", "titleMatch": "string" }
 ```
 
-## AI Automation
+## Silent Mode
+```json
+{ "type": "activate_silent_mode", "duration_minutes?": "number", "duration_hours?": "number", "trigger_type?": "manual|auto" }
+{ "type": "deactivate_silent_mode" }
+{ "type": "get_silent_status" }
+{ "type": "handle_silent_mode", "user_input": "string" }  // Smart router for silent mode operations
+```
+
+## AI Actions (Recurring/Scheduled Actions)
 ```json
 {
   "type": "schedule_ai_action",
@@ -121,13 +130,7 @@
 }
 { "type": "update_ai_action", "descriptionMatch": "string", "patch": { "description?": "string", "schedule?": {} } }
 { "type": "delete_ai_action", "descriptionMatch": "string" }
-```
-
-## Silent Mode
-```json
-{ "type": "activate_silent_mode", "duration_minutes?": "number", "duration_hours?": "number", "trigger_type?": "manual|auto" }
-{ "type": "deactivate_silent_mode" }
-{ "type": "get_silent_status" }
+{ "type": "list_ai_actions" }
 ```
 
 ## AI Interactions
@@ -139,6 +142,14 @@
 
 ## Utility Functions
 ```json
+// CORE: Intelligent Context Classification (Central Decision Tree)
+// This is the primary function that analyzes user input and determines appropriate action
+{
+  "type": "intelligent_context_classifier",
+  "user_input": "string",
+  "conversation_context?": "string"
+}
+
 // NEW: Timezone conversion for user-friendly time display
 // Use this when displaying times to ensure they appear in user's local timezone
 { "type": "convert_utc_to_user_timezone", "utc_time_str": "YYYY-MM-DDTHH:MM:SSZ" }
