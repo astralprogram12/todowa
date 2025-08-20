@@ -70,17 +70,25 @@ def test_list_ai_actions():
 def webhook():
     """Main webhook endpoint for processing incoming messages."""
     try:
-        # Get raw data, which could be a dict or a string
-        data = request.get_json(silent=True) or request.get_data(as_text=True)
+        # Get data from the request. This might be a dict or a string.
+        data = request.get_json(silent=True)
 
-        # If data is a string, it needs to be parsed into a dictionary
-        if isinstance(data, str):
-            try:
-                data = json.loads(data)
-            except json.JSONDecodeError:
-                return jsonify({"error": "Invalid JSON format received"}), 400
+        # If get_json() fails (e.g., wrong content type), it returns None.
+        # In that case, get the raw data as text.
+        if data is None:
+            raw_data = request.get_data(as_text=True)
+            # If we got raw data, try to parse it as JSON
+            if raw_data:
+                try:
+                    data = json.loads(raw_data)
+                except json.JSONDecodeError:
+                    return jsonify({"error": "Invalid JSON format received"}), 400
+            else:
+                # Handle cases where there is no data at all
+                return jsonify({"error": "No data received"}), 400
         
-        # Now, data is guaranteed to be a dictionary (or an error was returned)
+        # At this point, 'data' should be a dictionary.
+        # Now you can safely use .get()
         user_id = data.get('user_id')
         message_text = data.get('message', {}).get('text', '')
         
@@ -88,11 +96,18 @@ def webhook():
             return jsonify({"error": "Missing user_id or message text"}), 400
         
         # Process the message through the multi-agent system
+        # Ensure multi_agent_system is initialized
+        if not multi_agent_system:
+            return jsonify({"error": "Multi-agent system not initialized"}), 500
+        
         response = multi_agent_system.process_message(user_id, message_text)
         
         return jsonify({"success": True, "response": response})
+
     except Exception as e:
-        print(f"Error processing webhook: {str(e)}")
+        # It's helpful to log the type of data that caused the error
+        print(f"Error processing webhook. Data type received: {type(request.get_data(as_text=True))}")
+        print(f"Error: {str(e)}")
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
