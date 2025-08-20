@@ -1,5 +1,5 @@
-# orchestrator.py (IMPROVED VERSION)
-# Central orchestrator with transactional logic and proper failure handling.
+# orchestrator.py (FINAL, CONSOLIDATED VERSION)
+# Uses the single, unified tool registry.
 
 import asyncio
 import traceback
@@ -7,7 +7,16 @@ import os
 from datetime import datetime
 from typing import Dict, Any, Optional, List, Tuple
 
-from .tool_collections.communication_tools import send_reply_message
+# --- [THE FIX] ---
+# Import the one, true tool_registry from the correct, consolidated file.
+# We also need to add the path correction to ensure it can be found.
+import sys
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+if project_root not in sys.path:
+    sys.path.append(project_root)
+from enhanced_tools import tool_registry
+# --- [END OF FIX] ---
+
 from .agents import (
     BaseAgent, TaskAgent, ReminderAgent, SilentModeAgent,
     CoderAgent, AuditAgent, ExpertAgent, GuideAgent,
@@ -16,7 +25,7 @@ from .agents import (
 from .response_combiner import ResponseCombiner
 
 class Orchestrator:
-    """Central orchestrator with AI classification and transactional agent routing."""
+    """Orchestrator using a unified tool system and transactional agent routing."""
     
     def __init__(self, supabase, ai_model):
         self.supabase = supabase
@@ -27,7 +36,7 @@ class Orchestrator:
         self._initialize_agents()
     
     def _initialize_agents(self):
-        # ... (your agent initializations remain the same)
+        # ... (initializations are correct)
         self.agents['task'] = TaskAgent(self.supabase, self.ai_model)
         self.agents['reminder'] = ReminderAgent(self.supabase, self.ai_model)
         self.agents['silent_mode'] = SilentModeAgent(self.supabase, self.ai_model)
@@ -36,10 +45,10 @@ class Orchestrator:
         self.agents['expert'] = ExpertAgent(self.supabase, self.ai_model)
         self.agents['guide'] = GuideAgent(self.supabase, self.ai_model)
         self.agents['information'] = InformationAgent(self.supabase, self.ai_model)
-        self.agents['general'] = GeneralAgent(self.supabase, self.ai_model )
+        self.agents['general'] = GeneralAgent(self.supabase, self.ai_model)
 
     def load_all_agent_prompts(self, prompts_dir: str):
-        # ... (this function remains the same)
+        # ... (this function is correct)
         if not prompts_dir or not os.path.exists(prompts_dir): return
         print(f"Orchestrator is loading all agent prompts from {prompts_dir}...")
         all_agents = {**self.agents, 'intent_classifier': self.intent_classifier}
@@ -48,65 +57,43 @@ class Orchestrator:
         print("...All agent prompts loaded.")
 
     async def process_user_input(self, user_id: str, user_input: str, phone_number: str, conversation_id: Optional[str] = None):
-        """Process user input with transactional logic and graceful handling of uncertainty."""
+        """Processes user input and sends a reply using the unified tool registry."""
         final_response_dict = {}
+        # --- [THE FIX] Set the context for all tools at the start of the request ---
+        tool_registry.set_injection_context({"supabase": self.supabase, "user_id": user_id})
+        # --- [END OF FIX] ---
         try:
             is_silent, session = await self._check_silent_mode(user_id)
             if is_silent and 'silent' not in user_input.lower():
                 return {"message": "Silent mode is active. Message recorded.", "actions": []}
 
+            # ... (rest of the agent processing logic is correct)
             context = await self._get_or_create_context(user_id, conversation_id)
             classification = await self._classify_user_input(user_input, context)
-            print(f"AI Classification: {classification}")
-            
             agent_responses = []
             primary_agent_name = classification.get('primary_intent')
-
-            # --- [THE FIX] Handle the 'clarification_needed' intent ---
             if primary_agent_name == 'clarification_needed':
-                final_response_dict = {
-                    "message": "I'm not quite sure what you mean. Could you please rephrase that?",
-                    "status": "clarification_needed"
-                }
-            # --- [END OF FIX] ---
-            
-            # --- Transactional agent execution (if intent is clear) ---
+                final_response_dict = {"message": "I'm not quite sure what you mean. Could you please rephrase that?", "status": "clarification_needed"}
             elif primary_agent_name in self.agents:
-                print(f"Processing with primary agent: {primary_agent_name}")
-                primary_response = await self.agents[primary_agent_name].process(
-                    user_input, context, classification
-                )
+                primary_response = await self.agents[primary_agent_name].process(user_input, context, classification)
                 agent_responses.append(primary_response)
-                
                 if primary_response.get('status') == 'success':
                     for secondary_agent_name in classification.get('secondary_intents', []):
                         if secondary_agent_name in self.agents and secondary_agent_name != primary_agent_name:
-                            secondary_response = await self.agents[secondary_agent_name].process(
-                                user_input, context, classification
-                            )
+                            secondary_response = await self.agents[secondary_agent_name].process(user_input, context, classification)
                             agent_responses.append(secondary_response)
-                else:
-                    print("Primary agent failed. Skipping secondary agents.")
-            
-            # Combine responses using the intelligent combiner
             if agent_responses:
-                final_response_dict = ResponseCombiner.combine_responses(
-                    agent_responses, classification
-                )
+                final_response_dict = ResponseCombiner.combine_responses(agent_responses, classification)
             
-            # Update context
-            context['last_agent'] = classification.get('primary_intent')
-            context['last_input'] = user_input
-            context['last_response'] = final_response_dict.get('message')
-            context['last_classification'] = classification
-
-            # Send the final, coherent reply to the user.
+            # Send the final reply using the tool registry
             message_to_send = final_response_dict.get('message')
             if message_to_send:
                 print(f"Orchestrator sending final reply to {phone_number}: '{message_to_send}'")
-                send_reply_message(
-                    supabase_client=self.supabase, 
-                    user_id=user_id, phone_number=phone_number, message=message_to_send
+                # --- [THE FIX] Execute the tool via the registry ---
+                tool_registry.execute(
+                    "send_reply_message",
+                    phone_number=phone_number,
+                    message=message_to_send
                 )
             
             return final_response_dict
@@ -114,11 +101,12 @@ class Orchestrator:
         except Exception as e:
             traceback.print_exc()
             error_message = "I encountered an error. My team has been notified."
-            send_reply_message(self.supabase, user_id, phone_number, error_message)
+            # Also try to send the error message back to the user via the registry
+            tool_registry.execute("send_reply_message", phone_number=phone_number, message=error_message)
             return {"message": "An internal error occurred.", "error": str(e)}
-            
-    # ... (the rest of your _check_silent_mode, _classify_user_input, and _get_or_create_context methods remain the same)
+
     async def _check_silent_mode(self, user_id):
+        # --- [THE FIX] Import from the single, consolidated 'database' file ---
         try:
             from database_personal import get_active_silent_session
             session = get_active_silent_session(self.supabase, user_id)
