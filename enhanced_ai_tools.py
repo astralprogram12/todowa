@@ -16,6 +16,44 @@ class AIToolsError(Exception):
 
 # ==================== TASK MANAGEMENT ====================
 
+try:
+    import services
+except ImportError:
+    services = None
+
+@tool(name="send_reply_message", description="Sends a final text message to the user.", category="communication", auto_inject=["user_id"])
+def send_reply_message(phone_number: str, message: str, user_id: str = None) -> Dict[str, Any]:
+    """
+    Sends a final reply message to the user's phone number.
+    
+    Args:
+        phone_number: The user's phone number to send the message to.
+        message: The text content of the message.
+        user_id: Auto-injected user identifier for logging.
+    
+    Returns:
+        Dict indicating success or failure.
+    """
+    if not services:
+        error_msg = "services.py module could not be loaded. Cannot send message."
+        logger.error(error_msg)
+        return {"success": False, "error": error_msg}
+        
+    try:
+        logger.info(f"Sending reply via Fonnte to {phone_number} for user {user_id}")
+        result = services.send_fonnte_message(phone_number, message)
+        
+        if result and result.get("status"):
+            return {"success": True, "message": "Message sent successfully."}
+        else:
+            reason = result.get("reason", "Unknown Fonnte API error")
+            raise AIToolsError(f"Failed to send message via Fonnte: {reason}")
+            
+    except Exception as e:
+        logger.error(f"Error in send_reply_message tool: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+
 @tool(name="create_task", description="Create a new task", category="tasks", auto_inject=["supabase", "user_id"])
 def create_task(title: str, description: str = "", priority: str = "medium", 
                due_date: str = None, category: str = "general", 

@@ -1,8 +1,8 @@
 from .base_agent import BaseAgent
 
 class ActionAgent(BaseAgent):
-    def __init__(self, supabase_manager, gemini_manager):
-        super().__init__(supabase_manager, gemini_manager)
+    def __init__(self, supabase, ai_model):
+        super().__init__(supabase, ai_model, agent_name="ActionAgent")
         self.agent_type = "action"
 
     async def process(self, user_input, context, routing_info=None):
@@ -59,7 +59,7 @@ Available actions:
 Respond with the action plan and any confirmations needed.
 """
 
-            response = await self.gemini_manager.generate_response(
+            response = await self.ai_model.generate_content(
                 system_prompt, user_prompt
             )
             

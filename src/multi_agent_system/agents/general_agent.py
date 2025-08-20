@@ -1,7 +1,7 @@
 from .base_agent import BaseAgent
 
 class GeneralAgent(BaseAgent):
-    def __init__(self, supabase_manager, gemini_manager):
+    def __init__(self, supabase, ai_model):
         super().__init__(supabase_manager, gemini_manager)
         self.agent_type = "general"
 

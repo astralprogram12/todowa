@@ -124,7 +124,16 @@ def find_memory_by_title(supabase: Client, user_id: str, title_query: str):
     
     
 def add_memory_entry(supabase: Client, user_id: str, title: str, content: str | None = None, category: str | None = None):
-    entry = {"user_id": user_id, "title": title, "content": content, "category": category}
+    """Adds a new memory entry to the database with validation."""
+    # --- [THE FIX] Add a validation block ---
+    if not title or len(title.strip()) == 0:
+        raise ValueError("Title cannot be empty.")
+    if len(title) > 255: # Assuming a max length for the title column
+        raise ValueError("Title is too long.")
+    # You can add more checks for content, category, etc.
+    # --- [END OF FIX] ---
+
+    entry = {"user_id": user_id, "title": title.strip(), "content": content, "category": category}
     res = supabase.table("memory_entries").insert(entry).execute()
     if getattr(res, "error", None): raise Exception(str(res.error))
     return (res.data or [None])[0]
@@ -137,10 +146,16 @@ def update_memory_entry(supabase: Client, user_id: str, memory_id: str, patch: d
 def delete_memory_entry(supabase: Client, user_id: str, memory_id: str):
     supabase.table("memory_entries").delete().eq("id", memory_id).eq("user_id", user_id).execute()
 
+# In database_personal.py
 def search_memory_entries(supabase: Client, user_id: str, query: str, limit: int = 5):
+    """Searches memory entries by title and content securely."""
     try:
+        # Sanitize the query to prevent injection within the .or() f-string structure
+        sanitized_query = query.replace("'", "''")
+
         res = supabase.table("memory_entries").select("title, content, created_at") \
-            .eq("user_id", user_id).or_(f"title.ilike.%{query}%,content.ilike.%{query}%") \
+            .eq("user_id", user_id) \
+            .or_(f"title.ilike.%{sanitized_query}%,content.ilike.%{sanitized_query}%") \
             .order("created_at", desc=True).limit(limit).execute()
         return res.data or []
     except Exception as e:

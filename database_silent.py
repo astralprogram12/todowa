@@ -209,7 +209,7 @@ def get_expired_silent_sessions(supabase: Client) -> List[Dict[str, Any]]:
         query = """
         SELECT * FROM silent_sessions 
         WHERE is_active = true 
-        AND start_time + (duration_minutes || ' minutes')::INTERVAL < NOW()
+        AND start_time + (duration_minutes * INTERVAL '1 minute') < NOW()
         ORDER BY start_time ASC
         """
         

@@ -1,8 +1,8 @@
 from .base_agent import BaseAgent
 
 class SilentAgent(BaseAgent):
-    def __init__(self, supabase_manager, gemini_manager):
-        super().__init__(supabase_manager, gemini_manager)
+    def __init__(self, supabase, ai_model):
+        super().__init__(supabase, ai_model, agent_name="SilentAgent")
         self.agent_type = "silent"
 
     async def process(self, user_input, context, routing_info=None):
@@ -27,7 +27,7 @@ class SilentAgent(BaseAgent):
                 "09_intelligent_decision_tree.md"
             ]
             
-            system_prompt = await self.load_prompts(prompt_files)
+            system_prompt = self.load_prompts(prompt_files)
             
             # Add routing info to context if available
             enhanced_context = context.copy()
@@ -48,7 +48,7 @@ Analyze if this requires:
 If routing assumptions suggest specific silent behavior, follow them confidently.
 """
 
-            response = await self.gemini_manager.generate_response(
+            response = await self.ai_model.generate_content(
                 system_prompt, user_prompt
             )
             

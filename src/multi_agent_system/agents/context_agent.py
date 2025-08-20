@@ -1,8 +1,8 @@
 from .base_agent import BaseAgent
 
 class ContextAgent(BaseAgent):
-    def __init__(self, supabase_manager, gemini_manager):
-        super().__init__(supabase_manager, gemini_manager)
+    def __init__(self, supabase, ai_model):
+        super().__init__(supabase, ai_model, agent_name="ContextAgent")
         self.agent_type = "context"
 
     async def process(self, user_input, context, routing_info=None):
@@ -27,7 +27,7 @@ class ContextAgent(BaseAgent):
                 "09_intelligent_decision_tree.md"
             ]
             
-            system_prompt = await self.load_prompts(prompt_files)
+            system_prompt = self.load_prompts(prompt_files)
             
             # Add routing info to context if available
             enhanced_context = context.copy()
@@ -51,7 +51,7 @@ If routing assumptions suggest specific context operations, apply them confident
 Provide an appropriate response that addresses the context needs.
 """
 
-            response = await self.gemini_manager.generate_response(
+            response = await self.ai_model.generate_content(
                 system_prompt, user_prompt
             )
             
