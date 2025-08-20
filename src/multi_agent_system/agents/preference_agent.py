@@ -1,10 +1,12 @@
 from .base_agent import BaseAgent
 import database_personal  # Fix #4: Proper database import
+import os
 
 class PreferenceAgent(BaseAgent):
     def __init__(self, supabase, ai_model):  # Fix #1: Correct constructor
         super().__init__(supabase, ai_model, agent_name="PreferenceAgent")
         self.agent_type = "preference"
+        self.comprehensive_prompts = {}
 
     async def process(self, user_input, context, routing_info=None):
         """
@@ -15,9 +17,11 @@ class PreferenceAgent(BaseAgent):
             # Use routing_info assumptions if available
             assumptions = routing_info.get('assumptions', {}) if routing_info else {}
             
-            # Fix #3: Load prompts synchronously (no await)
-            prompts_dict = self.load_prompts("prompts")
-            system_prompt = prompts_dict.get("00_core_identity", "You are a helpful preferences agent.")
+            # Load comprehensive prompts
+            if not self.comprehensive_prompts:
+                self.load_comprehensive_prompts()
+            
+            system_prompt = self.comprehensive_prompts.get('core_system', "You are a helpful preferences agent.")
             
             # Add routing info to context if available
             enhanced_context = context.copy()
@@ -66,6 +70,72 @@ Provide appropriate response and indicate what actions should be taken.
                 "actions": ["preference_error"],
                 "error": str(e)
             }
+
+    def load_comprehensive_prompts(self):
+        """Load ALL prompts from the prompts/v1/ directory and requirements."""
+        try:
+            prompts_dict = {}
+            
+            # Load all prompts from v1 directory
+            v1_dir = "/workspace/user_input_files/todowa/prompts/v1"
+            if os.path.exists(v1_dir):
+                for file_name in os.listdir(v1_dir):
+                    if file_name.endswith('.md'):
+                        prompt_name = file_name.replace('.md', '')
+                        file_path = os.path.join(v1_dir, file_name)
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            prompts_dict[prompt_name] = f.read()
+            
+            # Load requirements
+            requirements_path = "/workspace/user_input_files/99_requirements.md"
+            if os.path.exists(requirements_path):
+                with open(requirements_path, 'r', encoding='utf-8') as f:
+                    prompts_dict['requirements'] = f.read()
+            
+            # Create comprehensive system prompt for preference agent
+            self.comprehensive_prompts = {
+                'core_system': self._build_preference_system_prompt(prompts_dict),
+                'core_identity': prompts_dict.get('00_core_identity', ''),
+                'templates': prompts_dict.get('08_templates', ''),
+                'context_memory': prompts_dict.get('03_context_memory', ''),
+                'requirements': prompts_dict.get('requirements', ''),
+                'all_prompts': prompts_dict
+            }
+            
+            return self.comprehensive_prompts
+        except Exception as e:
+            print(f"Error loading comprehensive prompts: {e}")
+            return {}
+    
+    def _build_preference_system_prompt(self, prompts_dict):
+        """Build comprehensive system prompt for preference agent."""
+        core_identity = prompts_dict.get('00_core_identity', '')
+        templates = prompts_dict.get('08_templates', '')
+        context_memory = prompts_dict.get('03_context_memory', '')
+        requirements = prompts_dict.get('requirements', '')
+        
+        return f"""{core_identity}
+
+## PREFERENCE AGENT SPECIALIZATION
+You are specifically focused on user preference management:
+- Setting and updating user preferences and settings
+- Managing notification preferences and communication settings
+- Handling personal information and configuration updates
+- Providing preference status and current settings information
+- Ensuring user preferences are properly stored and applied
+
+{templates}
+
+{context_memory}
+
+## REQUIREMENTS COMPLIANCE
+{requirements}
+
+## PREFERENCE AGENT BEHAVIOR
+- ALWAYS respect user privacy and preference choices
+- Use structured templates for preference confirmations
+- Apply context memory for preference history tracking
+- Follow comprehensive prompt system for enhanced preference management"""
 
     async def _handle_preference_request(self, ai_response, original_input, context, assumptions):
         """Handle the specific preference request based on AI analysis"""

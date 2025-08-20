@@ -1,15 +1,21 @@
 from .base_agent import BaseAgent
 import database_personal  # Fix #4: Proper database import
 import json
+import os
 
 class IntentClassifierAgent(BaseAgent):
     """AI-powered agent that classifies user intent and can express uncertainty."""
     
     def __init__(self, supabase, ai_model):  # Fix #1: Correct constructor
         super().__init__(supabase, ai_model, "IntentClassifierAgent")
+        self.comprehensive_prompts = {}
     
     async def classify_intent(self, user_input, context):
         """Classifies user intent using an AI model."""
+        # Load comprehensive prompts
+        if not self.comprehensive_prompts:
+            self.load_comprehensive_prompts()
+            
         classification_prompt = self._build_classification_prompt(user_input, context)
         
         try:
@@ -30,6 +36,72 @@ class IntentClassifierAgent(BaseAgent):
             print(f"Classification error: {e}. Falling back to ask for clarification.")
             return self._clarification_fallback(user_input)
     
+    def load_comprehensive_prompts(self):
+        """Load ALL prompts from the prompts/v1/ directory and requirements."""
+        try:
+            prompts_dict = {}
+            
+            # Load all prompts from v1 directory
+            v1_dir = "/workspace/user_input_files/todowa/prompts/v1"
+            if os.path.exists(v1_dir):
+                for file_name in os.listdir(v1_dir):
+                    if file_name.endswith('.md'):
+                        prompt_name = file_name.replace('.md', '')
+                        file_path = os.path.join(v1_dir, file_name)
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            prompts_dict[prompt_name] = f.read()
+            
+            # Load requirements
+            requirements_path = "/workspace/user_input_files/99_requirements.md"
+            if os.path.exists(requirements_path):
+                with open(requirements_path, 'r', encoding='utf-8') as f:
+                    prompts_dict['requirements'] = f.read()
+            
+            # Create comprehensive system prompt for intent classifier agent
+            self.comprehensive_prompts = {
+                'core_system': self._build_intent_classifier_system_prompt(prompts_dict),
+                'core_identity': prompts_dict.get('00_core_identity', ''),
+                'decision_tree': prompts_dict.get('09_intelligent_decision_tree', ''),
+                'ai_interactions': prompts_dict.get('04_ai_interactions', ''),
+                'requirements': prompts_dict.get('requirements', ''),
+                'all_prompts': prompts_dict
+            }
+            
+            return self.comprehensive_prompts
+        except Exception as e:
+            print(f"Error loading comprehensive prompts: {e}")
+            return {}
+    
+    def _build_intent_classifier_system_prompt(self, prompts_dict):
+        """Build comprehensive system prompt for intent classifier agent."""
+        core_identity = prompts_dict.get('00_core_identity', '')
+        decision_tree = prompts_dict.get('09_intelligent_decision_tree', '')
+        ai_interactions = prompts_dict.get('04_ai_interactions', '')
+        requirements = prompts_dict.get('requirements', '')
+        
+        return f"""{core_identity}
+
+## INTENT CLASSIFIER AGENT SPECIALIZATION
+You are specifically focused on intelligent intent classification:
+- Analyzing user input to determine the most appropriate action/agent
+- Expressing uncertainty when confidence is low
+- Providing meaningful assumptions about user intent
+- Using decision trees for systematic classification
+- Preferring clarification over incorrect assumptions
+
+{decision_tree}
+
+{ai_interactions}
+
+## REQUIREMENTS COMPLIANCE
+{requirements}
+
+## INTENT CLASSIFIER BEHAVIOR
+- ALWAYS apply comprehensive decision tree logic
+- Express uncertainty with confidence scores below 0.5
+- Provide specific assumptions to help other agents
+- Use intelligent routing based on comprehensive prompts"""
+
     def _build_classification_prompt(self, user_input, context):
         """Builds a robust prompt for the AI to classify user intent."""
         return f"""

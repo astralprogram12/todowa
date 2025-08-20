@@ -1,10 +1,12 @@
 from .base_agent import BaseAgent
 import database_personal  # Fix #4: Proper database import
+import os
 
 class HelpAgent(BaseAgent):
     def __init__(self, supabase, ai_model):  # Fix #1: Correct constructor
         super().__init__(supabase, ai_model, "HelpAgent")
         self.agent_type = "help"
+        self.comprehensive_prompts = {}
 
     async def process(self, user_input, context, routing_info=None):
         """
@@ -15,9 +17,11 @@ class HelpAgent(BaseAgent):
             # Use routing_info assumptions if available
             assumptions = routing_info.get('assumptions', {}) if routing_info else {}
             
-            # Fix #3: Load prompts synchronously (no await)
-            prompts_dict = self.load_prompts("prompts")
-            system_prompt = prompts_dict.get("00_core_identity", "You are a helpful support agent.")
+            # Load comprehensive prompts
+            if not self.comprehensive_prompts:
+                self.load_comprehensive_prompts()
+            
+            system_prompt = self.comprehensive_prompts.get('core_system', "You are a helpful support agent.")
             
             # Add routing info to context if available
             enhanced_context = context.copy()
@@ -90,6 +94,72 @@ Provide clear, actionable help information.
                 "actions": ["help_error"],
                 "error": str(e)
             }
+
+    def load_comprehensive_prompts(self):
+        """Load ALL prompts from the prompts/v1/ directory and requirements."""
+        try:
+            prompts_dict = {}
+            
+            # Load all prompts from v1 directory
+            v1_dir = "/workspace/user_input_files/todowa/prompts/v1"
+            if os.path.exists(v1_dir):
+                for file_name in os.listdir(v1_dir):
+                    if file_name.endswith('.md'):
+                        prompt_name = file_name.replace('.md', '')
+                        file_path = os.path.join(v1_dir, file_name)
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            prompts_dict[prompt_name] = f.read()
+            
+            # Load requirements
+            requirements_path = "/workspace/user_input_files/99_requirements.md"
+            if os.path.exists(requirements_path):
+                with open(requirements_path, 'r', encoding='utf-8') as f:
+                    prompts_dict['requirements'] = f.read()
+            
+            # Create comprehensive system prompt for help agent
+            self.comprehensive_prompts = {
+                'core_system': self._build_help_system_prompt(prompts_dict),
+                'core_identity': prompts_dict.get('00_core_identity', ''),
+                'templates': prompts_dict.get('08_templates', ''),
+                'ai_interactions': prompts_dict.get('04_ai_interactions', ''),
+                'requirements': prompts_dict.get('requirements', ''),
+                'all_prompts': prompts_dict
+            }
+            
+            return self.comprehensive_prompts
+        except Exception as e:
+            print(f"Error loading comprehensive prompts: {e}")
+            return {}
+    
+    def _build_help_system_prompt(self, prompts_dict):
+        """Build comprehensive system prompt for help agent."""
+        core_identity = prompts_dict.get('00_core_identity', '')
+        templates = prompts_dict.get('08_templates', '')
+        ai_interactions = prompts_dict.get('04_ai_interactions', '')
+        requirements = prompts_dict.get('requirements', '')
+        
+        return f"""{core_identity}
+
+## HELP AGENT SPECIALIZATION
+You are specifically focused on providing assistance and support:
+- Providing clear guidance on system features and capabilities
+- Offering step-by-step tutorials and instructions
+- Troubleshooting common problems and errors
+- Categorizing help requests for targeted assistance
+- Maintaining a helpful and supportive tone
+
+{templates}
+
+{ai_interactions}
+
+## REQUIREMENTS COMPLIANCE
+{requirements}
+
+## HELP AGENT BEHAVIOR
+- ALWAYS provide clear, actionable guidance
+- Use structured help categories for better organization
+- Apply comprehensive templates for consistent responses
+- Follow comprehensive prompt system for enhanced assistance"""
 
     async def _provide_detailed_help(self, help_category, user_input, assumptions):
         """Provide detailed help based on category"""

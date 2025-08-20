@@ -1,11 +1,13 @@
 from .base_agent import BaseAgent
 import database_personal  # Fix #4: Proper database import
+import os
 
 class ReminderAgent(BaseAgent):
     """Agent for handling reminder-related operations."""
     
     def __init__(self, supabase, ai_model):  # Fix #1: Correct constructor
         super().__init__(supabase, ai_model, "ReminderAgent")
+        self.comprehensive_prompts = {}
     
     async def process(self, user_input, context, routing_info=None):
         """Process reminder-related user input and return a response.
@@ -19,6 +21,10 @@ class ReminderAgent(BaseAgent):
             A response to the user input
         """
         user_id = context.get('user_id')
+        
+        # Load comprehensive prompts
+        if not self.comprehensive_prompts:
+            self.load_comprehensive_prompts()
         
         # NEW: Apply AI assumptions to enhance processing
         enhanced_context = self._apply_ai_assumptions(context, routing_info)
@@ -44,6 +50,77 @@ class ReminderAgent(BaseAgent):
                 "status": "error",
                 "message": "I'm not sure what reminder operation you want to perform. Please try again with a clearer request."
             }
+    
+    
+    def load_comprehensive_prompts(self):
+        """Load ALL prompts from the prompts/v1/ directory and requirements."""
+        try:
+            prompts_dict = {}
+            
+            # Load all prompts from v1 directory
+            v1_dir = "/workspace/user_input_files/todowa/prompts/v1"
+            if os.path.exists(v1_dir):
+                for file_name in os.listdir(v1_dir):
+                    if file_name.endswith('.md'):
+                        prompt_name = file_name.replace('.md', '')
+                        file_path = os.path.join(v1_dir, file_name)
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            prompts_dict[prompt_name] = f.read()
+            
+            # Load requirements
+            requirements_path = "/workspace/user_input_files/99_requirements.md"
+            if os.path.exists(requirements_path):
+                with open(requirements_path, 'r', encoding='utf-8') as f:
+                    prompts_dict['requirements'] = f.read()
+            
+            # Create comprehensive system prompt for reminder agent
+            self.comprehensive_prompts = {
+                'core_system': self._build_reminder_system_prompt(prompts_dict),
+                'core_identity': prompts_dict.get('00_core_identity', ''),
+                'time_handling': prompts_dict.get('06_time_handling', ''),
+                'templates': prompts_dict.get('08_templates', ''),
+                'context_memory': prompts_dict.get('03_context_memory', ''),
+                'requirements': prompts_dict.get('requirements', ''),
+                'all_prompts': prompts_dict
+            }
+            
+            return self.comprehensive_prompts
+        except Exception as e:
+            print(f"Error loading comprehensive prompts: {e}")
+            return {}
+    
+    def _build_reminder_system_prompt(self, prompts_dict):
+        """Build comprehensive system prompt for reminder agent."""
+        core_identity = prompts_dict.get('00_core_identity', '')
+        time_handling = prompts_dict.get('06_time_handling', '')
+        templates = prompts_dict.get('08_templates', '')
+        context_memory = prompts_dict.get('03_context_memory', '')
+        requirements = prompts_dict.get('requirements', '')
+        
+        return f"""{core_identity}
+
+## REMINDER AGENT SPECIALIZATION
+You are specifically focused on reminder management:
+- Creating time-based and event-based reminders
+- Parsing natural language time expressions
+- Managing reminder updates, deletions, and listings
+- Understanding complex scheduling requirements
+- Providing clear confirmation of reminder settings
+
+{time_handling}
+
+{templates}
+
+{context_memory}
+
+## REQUIREMENTS COMPLIANCE
+{requirements}
+
+## REMINDER AGENT BEHAVIOR
+- ALWAYS apply time handling rules for accurate parsing
+- Use structured templates for reminder confirmations
+- Apply context memory for reminder history and patterns
+- Follow comprehensive prompt system for enhanced reminder processing"""
     
     def _apply_ai_assumptions(self, context, routing_info):
         """Apply AI assumptions to enhance the context"""
@@ -78,9 +155,8 @@ class ReminderAgent(BaseAgent):
         reminder_time = assumptions.get('reminder_time') or self._extract_reminder_time(user_input)
         reminder_type = assumptions.get('reminder_type', 'time_based')  # time_based or location_based
         
-        # Fix #3: Load prompts synchronously (no await)
-        prompts_dict = self.load_prompts("prompts")
-        system_prompt = prompts_dict.get("00_core_identity", "You are a helpful reminder agent.")
+        # Get system prompt from comprehensive prompts
+        system_prompt = self.comprehensive_prompts.get('core_system', "You are a helpful reminder agent.")
         
         user_prompt = f"""
 User Input: {user_input}

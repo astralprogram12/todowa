@@ -1,11 +1,13 @@
 from .base_agent import BaseAgent
 import database_personal  # Fix #4: Proper database import
+import os
 
 class CoderAgent(BaseAgent):
     """Agent for handling code-related operations."""
     
     def __init__(self, supabase, ai_model):  # Fix #1: Correct constructor
         super().__init__(supabase, ai_model, "CoderAgent")
+        self.comprehensive_prompts = {}
     
     async def process(self, user_input, context, routing_info=None):
         """Process code-related user input and return a response.
@@ -19,6 +21,10 @@ class CoderAgent(BaseAgent):
             A response to the user input
         """
         user_id = context.get('user_id')
+        
+        # Load comprehensive prompts
+        if not self.comprehensive_prompts:
+            self.load_comprehensive_prompts()
         
         # NEW: Apply AI assumptions to enhance processing
         enhanced_context = self._apply_ai_assumptions(context, routing_info)
@@ -45,6 +51,74 @@ class CoderAgent(BaseAgent):
                 "status": "error",
                 "message": "I'm not sure what code operation you want to perform. Please try again with a clearer request."
             }
+    
+    
+    def load_comprehensive_prompts(self):
+        """Load ALL prompts from the prompts/v1/ directory and requirements."""
+        try:
+            prompts_dict = {}
+            
+            # Load all prompts from v1 directory
+            v1_dir = "/workspace/user_input_files/todowa/prompts/v1"
+            if os.path.exists(v1_dir):
+                for file_name in os.listdir(v1_dir):
+                    if file_name.endswith('.md'):
+                        prompt_name = file_name.replace('.md', '')
+                        file_path = os.path.join(v1_dir, file_name)
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            prompts_dict[prompt_name] = f.read()
+            
+            # Load requirements
+            requirements_path = "/workspace/user_input_files/99_requirements.md"
+            if os.path.exists(requirements_path):
+                with open(requirements_path, 'r', encoding='utf-8') as f:
+                    prompts_dict['requirements'] = f.read()
+            
+            # Create comprehensive system prompt for coder agent
+            self.comprehensive_prompts = {
+                'core_system': self._build_coder_system_prompt(prompts_dict),
+                'core_identity': prompts_dict.get('00_core_identity', ''),
+                'ai_interactions': prompts_dict.get('04_ai_interactions', ''),
+                'templates': prompts_dict.get('08_templates', ''),
+                'requirements': prompts_dict.get('requirements', ''),
+                'all_prompts': prompts_dict
+            }
+            
+            return self.comprehensive_prompts
+        except Exception as e:
+            print(f"Error loading comprehensive prompts: {e}")
+            return {}
+    
+    def _build_coder_system_prompt(self, prompts_dict):
+        """Build comprehensive system prompt for coder agent."""
+        core_identity = prompts_dict.get('00_core_identity', '')
+        ai_interactions = prompts_dict.get('04_ai_interactions', '')
+        templates = prompts_dict.get('08_templates', '')
+        requirements = prompts_dict.get('requirements', '')
+        
+        return f"""{core_identity}
+
+## CODER AGENT SPECIALIZATION
+You are specifically focused on code-related operations:
+- Generating clean, well-documented code in various languages
+- Explaining code functionality and logic
+- Debugging and troubleshooting code issues
+- Providing code examples and best practices
+- Following language-specific conventions and standards
+
+{ai_interactions}
+
+{templates}
+
+## REQUIREMENTS COMPLIANCE
+{requirements}
+
+## CODER AGENT BEHAVIOR
+- ALWAYS provide clean, readable code with comments
+- Use proper language-specific conventions and best practices
+- Include usage examples when generating code
+- Apply comprehensive prompt guidance for enhanced code assistance
+- Follow security and performance best practices"""
     
     def _apply_ai_assumptions(self, context, routing_info):
         """Apply AI assumptions to enhance the context"""
@@ -96,9 +170,8 @@ class CoderAgent(BaseAgent):
                 "message": "I couldn't determine what code to generate. Please provide a clear description."
             }
         
-        # Fix #3: Load prompts synchronously (no await)
-        prompts_dict = self.load_prompts("prompts")
-        system_prompt = prompts_dict.get("00_core_identity", "You are a helpful coding agent.")
+        # Get system prompt from comprehensive prompts
+        system_prompt = self.comprehensive_prompts.get('core_system', "You are a helpful coding agent.")
         
         user_prompt = f"""
 Generate {language or 'generic'} code for: {description}
@@ -147,9 +220,8 @@ Requirements:
                 "message": "I couldn't find any code to explain in your message. Please provide the code you'd like me to explain."
             }
         
-        # Fix #3: Load prompts synchronously (no await)
-        prompts_dict = self.load_prompts("prompts")
-        system_prompt = prompts_dict.get("00_core_identity", "You are a helpful coding agent.")
+        # Get system prompt from comprehensive prompts
+        system_prompt = self.comprehensive_prompts.get('core_system', "You are a helpful coding agent.")
         
         user_prompt = f"""
 Explain this code in detail:
@@ -201,9 +273,8 @@ Please provide:
                 "message": "I couldn't find any code to debug. Please provide the code and describe the issue."
             }
         
-        # Fix #3: Load prompts synchronously (no await)
-        prompts_dict = self.load_prompts("prompts")
-        system_prompt = prompts_dict.get("00_core_identity", "You are a helpful coding agent.")
+        # Get system prompt from comprehensive prompts
+        system_prompt = self.comprehensive_prompts.get('core_system', "You are a helpful coding agent.")
         
         user_prompt = f"""
 Debug this code:

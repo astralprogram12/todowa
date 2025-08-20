@@ -1,11 +1,13 @@
 from .base_agent import BaseAgent
 import database_personal  # Fix #4: Proper database import
+import os
 
 class SilentModeAgent(BaseAgent):
     """Agent for handling silent mode operations."""
     
     def __init__(self, supabase, ai_model):  # Fix #1: Correct constructor
         super().__init__(supabase, ai_model, "SilentModeAgent")
+        self.comprehensive_prompts = {}
     
     async def process(self, user_input, context, routing_info=None):
         """Process silent mode-related user input and return a response.
@@ -19,6 +21,10 @@ class SilentModeAgent(BaseAgent):
             A response to the user input
         """
         user_id = context.get('user_id')
+        
+        # Load comprehensive prompts
+        if not self.comprehensive_prompts:
+            self.load_comprehensive_prompts()
         
         # NEW: Apply AI assumptions to enhance processing
         enhanced_context = self._apply_ai_assumptions(context, routing_info)
@@ -44,6 +50,73 @@ class SilentModeAgent(BaseAgent):
                 "status": "error",
                 "message": "I'm not sure what silent mode operation you want to perform. Please try again with a clearer request."
             }
+    
+    
+    def load_comprehensive_prompts(self):
+        """Load ALL prompts from the prompts/v1/ directory and requirements."""
+        try:
+            prompts_dict = {}
+            
+            # Load all prompts from v1 directory
+            v1_dir = "/workspace/user_input_files/todowa/prompts/v1"
+            if os.path.exists(v1_dir):
+                for file_name in os.listdir(v1_dir):
+                    if file_name.endswith('.md'):
+                        prompt_name = file_name.replace('.md', '')
+                        file_path = os.path.join(v1_dir, file_name)
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            prompts_dict[prompt_name] = f.read()
+            
+            # Load requirements
+            requirements_path = "/workspace/user_input_files/99_requirements.md"
+            if os.path.exists(requirements_path):
+                with open(requirements_path, 'r', encoding='utf-8') as f:
+                    prompts_dict['requirements'] = f.read()
+            
+            # Create comprehensive system prompt for silent mode agent
+            self.comprehensive_prompts = {
+                'core_system': self._build_silent_mode_system_prompt(prompts_dict),
+                'core_identity': prompts_dict.get('00_core_identity', ''),
+                'silent_mode': prompts_dict.get('05_silent_mode', ''),
+                'time_handling': prompts_dict.get('06_time_handling', ''),
+                'requirements': prompts_dict.get('requirements', ''),
+                'all_prompts': prompts_dict
+            }
+            
+            return self.comprehensive_prompts
+        except Exception as e:
+            print(f"Error loading comprehensive prompts: {e}")
+            return {}
+    
+    def _build_silent_mode_system_prompt(self, prompts_dict):
+        """Build comprehensive system prompt for silent mode agent."""
+        core_identity = prompts_dict.get('00_core_identity', '')
+        silent_mode = prompts_dict.get('05_silent_mode', '')
+        time_handling = prompts_dict.get('06_time_handling', '')
+        requirements = prompts_dict.get('requirements', '')
+        
+        return f"""{core_identity}
+
+## SILENT MODE AGENT SPECIALIZATION
+You are specifically focused on silent mode management:
+- Activating and deactivating silent mode periods
+- Managing notification suppression and quiet times
+- Handling duration-based silent mode operations
+- Providing status updates on silent mode state
+- Understanding time-based silent mode requests
+
+{silent_mode}
+
+{time_handling}
+
+## REQUIREMENTS COMPLIANCE
+{requirements}
+
+## SILENT MODE AGENT BEHAVIOR
+- ALWAYS apply time handling rules for duration parsing
+- Use silent mode guidelines for appropriate responses
+- Follow comprehensive prompt system for enhanced processing
+- Manage silent periods with precision and user preference"""
     
     def _apply_ai_assumptions(self, context, routing_info):
         """Apply AI assumptions to enhance the context"""

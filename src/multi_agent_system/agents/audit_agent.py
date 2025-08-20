@@ -1,14 +1,90 @@
 from .base_agent import BaseAgent
 import database_personal  # Fix #4: Proper database import
+import os
 
 class AuditAgent(BaseAgent):
     """Agent for handling audit and activity logging operations."""
     
     def __init__(self, supabase, ai_model):  # Fix #1: Correct constructor
         super().__init__(supabase, ai_model, "AuditAgent")
+        self.comprehensive_prompts = {}
     
+    def load_comprehensive_prompts(self):
+        """Load ALL prompts from the prompts/v1/ directory and requirements."""
+        try:
+            prompts_dict = {}
+            
+            # Load all prompts from v1 directory
+            v1_dir = "/workspace/user_input_files/todowa/prompts/v1"
+            if os.path.exists(v1_dir):
+                for file_name in os.listdir(v1_dir):
+                    if file_name.endswith('.md'):
+                        prompt_name = file_name.replace('.md', '')
+                        file_path = os.path.join(v1_dir, file_name)
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            prompts_dict[prompt_name] = f.read()
+            
+            # Load requirements
+            requirements_path = "/workspace/user_input_files/99_requirements.md"
+            if os.path.exists(requirements_path):
+                with open(requirements_path, 'r', encoding='utf-8') as f:
+                    prompts_dict['requirements'] = f.read()
+            
+            # Create comprehensive system prompt for audit operations
+            self.comprehensive_prompts = {
+                'core_system': self._build_audit_system_prompt(prompts_dict),
+                'action_schema': prompts_dict.get('01_action_schema', ''),
+                'safety_validation': prompts_dict.get('07_safety_validation', ''),
+                'templates': prompts_dict.get('08_templates', ''),
+                'context_memory': prompts_dict.get('03_context_memory', ''),
+                'requirements': prompts_dict.get('requirements', ''),
+                'all_prompts': prompts_dict
+            }
+            
+            return self.comprehensive_prompts
+        except Exception as e:
+            print(f"Error loading comprehensive prompts: {e}")
+            return {}
+    
+    def _build_audit_system_prompt(self, prompts_dict):
+        """Build comprehensive system prompt for audit agent."""
+        core_identity = prompts_dict.get('00_core_identity', '')
+        action_schema = prompts_dict.get('01_action_schema', '')
+        safety_validation = prompts_dict.get('07_safety_validation', '')
+        templates = prompts_dict.get('08_templates', '')
+        context_memory = prompts_dict.get('03_context_memory', '')
+        requirements = prompts_dict.get('requirements', '')
+        
+        return f"""{core_identity}
+
+## AUDIT AGENT SPECIALIZATION
+You are specifically focused on audit and activity monitoring including:
+- Viewing and analyzing user activity logs
+- Filtering and searching through historical data
+- Providing activity summaries and insights
+- Maintaining data privacy and security
+- Generating audit reports and analytics
+
+{action_schema}
+
+{safety_validation}
+
+{templates}
+
+{context_memory}
+
+## REQUIREMENTS COMPLIANCE
+{requirements}
+
+## AUDIT AGENT BEHAVIOR
+- Apply structured templates for audit report formatting
+- Follow safety validation protocols for data access
+- Use comprehensive action schema for audit operations
+- Maintain privacy and security in all audit activities
+- Provide clear, organized activity summaries"""
+
     async def process(self, user_input, context, routing_info=None):
-        """Process audit-related user input and return a response.
+        """Process audit-related user input with comprehensive prompt system.
         
         Args:
             user_input: The input text from the user
@@ -19,6 +95,10 @@ class AuditAgent(BaseAgent):
             A response to the user input
         """
         user_id = context.get('user_id')
+        
+        # Load comprehensive prompts
+        if not self.comprehensive_prompts:
+            self.load_comprehensive_prompts()
         
         # NEW: Apply AI assumptions to enhance processing
         enhanced_context = self._apply_ai_assumptions(context, routing_info)
@@ -31,11 +111,11 @@ class AuditAgent(BaseAgent):
         operation = self._determine_operation(user_input)
         
         if operation == 'view_activity':
-            return await self._view_activity(user_id, user_input, context)
+            return await self._view_activity(user_id, user_input, enhanced_context)
         elif operation == 'view_logs':
-            return await self._view_logs(user_id, user_input, context)
+            return await self._view_logs(user_id, user_input, enhanced_context)
         elif operation == 'filter_activity':
-            return await self._filter_activity(user_id, user_input, context)
+            return await self._filter_activity(user_id, user_input, enhanced_context)
         else:
             return {
                 "status": "error",
