@@ -8,17 +8,25 @@ class AuditAgent(BaseAgent):
     def __init__(self, supabase, ai_model):
         super().__init__(supabase, ai_model, "AuditAgent")
     
-    async def process(self, user_input, context):
+    async def process(self, user_input, context, routing_info=None):
         """Process audit-related user input and return a response.
         
         Args:
             user_input: The input text from the user
             context: The context of the conversation
+            routing_info: NEW - AI classification with smart assumptions
             
         Returns:
             A response to the user input
         """
         user_id = context.get('user_id')
+        
+        # NEW: Apply AI assumptions to enhance processing
+        enhanced_context = self._apply_ai_assumptions(context, routing_info)
+        
+        # NEW: Use AI assumptions if available
+        if routing_info and routing_info.get('assumptions'):
+            print(f"AuditAgent using AI assumptions: {routing_info['assumptions']}")
         
         # Parse the user input to determine the audit operation
         operation = self._determine_operation(user_input)

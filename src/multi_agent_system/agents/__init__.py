@@ -1,4 +1,5 @@
-# Agent modules
+# MODIFIED FILE: agents/__init__.py
+# REPLACE the existing __init__.py with this:
 
 from .base_agent import BaseAgent
 from .task_agent import TaskAgent
@@ -9,13 +10,19 @@ from .audit_agent import AuditAgent
 from .expert_agent import ExpertAgent
 from .guide_agent import GuideAgent
 
+# NEW IMPORTS - ADD THESE TWO LINES:
+from .intent_classifier_agent import IntentClassifierAgent
+from ..response_combiner import ResponseCombiner
+
 __all__ = [
     'BaseAgent',
     'TaskAgent',
-    'ReminderAgent',
+    'ReminderAgent', 
     'SilentModeAgent',
     'CoderAgent',
     'AuditAgent',
     'ExpertAgent',
-    'GuideAgent'
+    'GuideAgent',
+    'IntentClassifierAgent',  # NEW LINE
+    'ResponseCombiner'        # NEW LINE
 ]

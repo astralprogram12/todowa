@@ -8,20 +8,30 @@ class GuideAgent(BaseAgent):
     def __init__(self, supabase, ai_model):
         super().__init__(supabase, ai_model, "GuideAgent")
     
-    async def process(self, user_input, context):
+    async def process(self, user_input, context, routing_info=None):
         """Process guide requests and return a response.
         
         Args:
             user_input: The input text from the user
             context: The context of the conversation
+            routing_info: NEW - AI classification with smart assumptions
             
         Returns:
             A response to the user input
         """
         user_id = context.get('user_id')
         
-        # Determine the topic for the guide
-        topic = self._determine_topic(user_input)
+        # NEW: Apply AI assumptions to enhance processing
+        enhanced_context = self._apply_ai_assumptions(context, routing_info)
+        
+        # NEW: Use AI assumptions if available
+        if routing_info and routing_info.get('assumptions'):
+            print(f"GuideAgent using AI assumptions: {routing_info['assumptions']}")
+            # Use AI-suggested topic if available
+            topic = routing_info['assumptions'].get('topic') or self._determine_topic(user_input)
+        else:
+            # Determine the topic for the guide
+            topic = self._determine_topic(user_input)
         
         # Generate guide based on the topic and user input
         return await self._generate_guide(user_id, user_input, topic, context)

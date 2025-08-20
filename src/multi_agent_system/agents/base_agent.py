@@ -1,5 +1,6 @@
+# base_agent.py
 # Updated Base Agent class that all specialized agents inherit from
-# Now integrates the tools system via the AgentToolsMixin
+# UPDATED VERSION with new process method signature for AI routing
 
 import os
 from ..agent_tools_mixin import AgentToolsMixin
@@ -52,17 +53,44 @@ class BaseAgent(AgentToolsMixin):
             print(f"Error loading prompts: {e}")
             return {}
     
-    async def process(self, user_input, context):
+    # UPDATED METHOD SIGNATURE - This is the key change
+    async def process(self, user_input, context, routing_info=None):
         """Process user input and return a response.
         
         Args:
             user_input: The input text from the user
-            context: The context of the conversation
+            context: The context of the conversation  
+            routing_info: NEW - AI classification with smart assumptions
+                         Contains: primary_intent, confidence, reasoning, assumptions
             
         Returns:
             A response to the user input
         """
         raise NotImplementedError("Subclasses must implement this method")
+    
+    def _apply_ai_assumptions(self, context, routing_info):
+        """Apply AI assumptions to enhance processing context
+        
+        Args:
+            context: Original context
+            routing_info: AI routing information with assumptions
+            
+        Returns:
+            Enhanced context with AI assumptions applied
+        """
+        if not routing_info or not routing_info.get('assumptions'):
+            return context
+        
+        # Create enhanced context with AI assumptions
+        enhanced_context = context.copy()
+        enhanced_context.update({
+            'ai_assumptions': routing_info['assumptions'],
+            'ai_confidence': routing_info.get('confidence', 0.6),
+            'ai_reasoning': routing_info.get('reasoning', '')
+        })
+        
+        print(f"[{self.agent_name}] Applying AI assumptions: {routing_info['assumptions']}")
+        return enhanced_context
     
     def _log_action(self, user_id, action_type, entity_type, entity_id=None, 
                    action_details=None, success_status=True, error_details=None):
@@ -163,11 +191,10 @@ class BaseAgent(AgentToolsMixin):
         Returns:
             A helpful response to guide the user
         """
-        # TODO: Implement advanced confusion handling logic
-        # For now, return a simple response
+        # Return confident guidance instead of confusion
         if user_input:
-            return f"I'm not sure I understand what you mean by '{user_input}'. {content_description}"
-        return f"I'm having trouble understanding. {content_description}"
+            return f"I'll help you with '{user_input}'. Let me assist you with that."
+        return f"I'll help you with that. {content_description}"
     
     async def get_tool_suggestions(self, user_input):
         """Get tool suggestions based on user input.

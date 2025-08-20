@@ -8,17 +8,26 @@ class ReminderAgent(BaseAgent):
     def __init__(self, supabase, ai_model):
         super().__init__(supabase, ai_model, "ReminderAgent")
     
-    async def process(self, user_input, context):
+    async def process(self, user_input, context, routing_info=None):
         """Process reminder-related user input and return a response.
         
         Args:
             user_input: The input text from the user
             context: The context of the conversation
+            routing_info: NEW - AI classification with smart assumptions
             
         Returns:
             A response to the user input
         """
         user_id = context.get('user_id')
+        
+        # NEW: Apply AI assumptions to enhance processing
+        enhanced_context = self._apply_ai_assumptions(context, routing_info)
+        
+        # NEW: Use AI assumptions if available
+        if routing_info and routing_info.get('assumptions'):
+            print(f"ReminderAgent using AI assumptions: {routing_info['assumptions']}")
+            return await self._process_with_ai_assumptions(user_input, enhanced_context, routing_info)
         
         # Parse the user input to determine the reminder operation
         operation = self._determine_operation(user_input)
@@ -52,6 +61,27 @@ class ReminderAgent(BaseAgent):
         else:
             # Default to set if unclear but contains 'remind'
             return 'set' if 'remind' in user_input_lower else None
+    
+    async def _process_with_ai_assumptions(self, user_input, context, routing_info):
+        """Process reminder with AI-provided assumptions"""
+        user_id = context.get('user_id')
+        assumptions = routing_info.get('assumptions', {})
+        
+        # Extract reminder details with AI enhancement
+        task_title = self._extract_task_title(user_input) or assumptions.get('task_title') or user_input.strip()
+        reminder_time = self._extract_reminder_time(user_input) or assumptions.get('reminder_time')
+        
+        if not reminder_time:
+            # Make a confident guess about timing
+            default_time = assumptions.get('default_time', 'tomorrow at 9am')
+            return {
+                "status": "ok", 
+                "message": f"I'll set a reminder for '{task_title}' {default_time}. Is that correct?",
+                "confident_guess": True
+            }
+        
+        # Continue with setting the reminder using enhanced details
+        return await self._set_reminder(user_id, user_input, context)
     
     async def _set_reminder(self, user_id, user_input, context):
         """Set a reminder based on user input."""

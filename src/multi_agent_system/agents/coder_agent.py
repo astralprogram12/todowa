@@ -8,20 +8,31 @@ class CoderAgent(BaseAgent):
     def __init__(self, supabase, ai_model):
         super().__init__(supabase, ai_model, "CoderAgent")
     
-    async def process(self, user_input, context):
+    async def process(self, user_input, context, routing_info=None):
         """Process code-related user input and return a response.
-        
+       
         Args:
             user_input: The input text from the user
             context: The context of the conversation
+            routing_info: NEW - AI classification with smart assumptions
             
         Returns:
             A response to the user input
         """
         user_id = context.get('user_id')
         
+        # NEW: Apply AI assumptions to enhance processing
+        enhanced_context = self._apply_ai_assumptions(context, routing_info)
+        
+        # NEW: Use AI assumptions if available
+        if routing_info and routing_info.get('assumptions'):
+            print(f"CoderAgent using AI assumptions: {routing_info['assumptions']}")
+            # Use AI-suggested language if available
+            language = routing_info['assumptions'].get('language')
+        
         # Parse the user input to determine the code operation
-        operation, language = self._determine_operation(user_input)
+        operation, detected_language = self._determine_operation(user_input)
+        language = language or detected_language  # AI assumption takes priority
         
         if operation == 'generate':
             return await self._generate_code(user_id, user_input, language, context)

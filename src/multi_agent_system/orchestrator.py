@@ -1,5 +1,6 @@
 # orchestrator.py
 # Central orchestrator for the multi-agent system
+# UPDATED VERSION with AI-powered intent classification
 
 import asyncio
 import traceback
@@ -10,20 +11,27 @@ from typing import Dict, Any, Optional, List, Tuple
 # We import the communication tool directly to use it for sending replies.
 from .tool_collections.communication_tools import send_reply_message
 
+# UPDATED IMPORTS - Added new AI classification components
 from .agents import (
     BaseAgent, TaskAgent, ReminderAgent, SilentModeAgent,
-    CoderAgent, AuditAgent, ExpertAgent, GuideAgent
+    CoderAgent, AuditAgent, ExpertAgent, GuideAgent,
+    IntentClassifierAgent  # NEW
 )
+from .response_combiner import ResponseCombiner  # NEW
 
 class Orchestrator:
-    """Central orchestrator for the multi-agent system."""
+    """Central orchestrator for the multi-agent system with AI-powered intent classification."""
     
     def __init__(self, supabase, ai_model):
-        """Initialize the orchestrator."""
+        """Initialize the orchestrator with AI classification capability."""
         self.supabase = supabase
         self.ai_model = ai_model
         self.agents = {}
         self.user_contexts = {}
+        
+        # NEW: Initialize the AI intent classifier
+        self.intent_classifier = IntentClassifierAgent(supabase, ai_model)
+        
         self._initialize_agents()
     
     def _initialize_agents(self):
@@ -42,35 +50,74 @@ class Orchestrator:
             print(f"WARNING: Prompts directory not found at {prompts_dir}.")
             return
         print(f"Orchestrator is loading all agent prompts from {prompts_dir}...")
-        for agent_name, agent in self.agents.items():
+        
+        # Load prompts for all agents including the new classifier
+        all_agents = {**self.agents, 'intent_classifier': self.intent_classifier}
+        
+        for agent_name, agent in all_agents.items():
             if hasattr(agent, 'load_prompts'):
                 agent.load_prompts(prompts_dir)
         print("...All agent prompts loaded.")
 
     async def process_user_input(self, user_id: str, user_input: str, phone_number: str, conversation_id: Optional[str] = None):
-        """Process user input, route to an agent, and ALWAYS send the reply."""
+        """Process user input with AI-powered multi-agent routing and ALWAYS send reply."""
         final_response_dict = {}
         try:
-            # High-priority check for silent mode
+            # High-priority check for silent mode (unchanged)
             is_silent, session = await self._check_silent_mode(user_id)
             if is_silent and 'silent' not in user_input.lower():
                 return {"message": "Silent mode is active. Message recorded.", "actions": []}
 
-            # Normal agent processing to determine a response
+            # NEW: AI-powered classification instead of keyword matching
             context = await self._get_or_create_context(user_id, conversation_id)
             classification = await self._classify_user_input(user_input, context)
-            agent_type = classification['agent_type']
             
-            if classification['confidence'] >= 0.4 and agent_type in self.agents:
-                final_response_dict = await self.agents[agent_type].process(user_input, context)
+            print(f"AI Classification: {classification}")
+            
+            # NEW: Handle multiple agents based on AI classification
+            agent_responses = []
+            
+            # Process primary intent
+            primary_agent = classification['primary_intent']
+            if primary_agent in self.agents:
+                print(f"Processing with primary agent: {primary_agent}")
+                response = await self.agents[primary_agent].process(
+                    user_input, context, classification
+                )
+                agent_responses.append(response)
+            
+            # Process secondary intents (if any)
+            for secondary_agent in classification.get('secondary_intents', []):
+                if secondary_agent in self.agents and secondary_agent != primary_agent:
+                    print(f"Processing with secondary agent: {secondary_agent}")
+                    response = await self.agents[secondary_agent].process(
+                        user_input, context, classification
+                    )
+                    agent_responses.append(response)
+            
+            # Combine all agent responses intelligently
+            if agent_responses:
+                final_response_dict = ResponseCombiner.combine_responses(
+                    agent_responses, classification
+                )
             else:
-                final_response_dict = {"message": "I'm not sure I understand. Could you please clarify?"}
+                # Confident fallback response (never confusion)
+                final_response_dict = {
+                    "message": "I'll help you with that right away.",
+                    "status": "success",
+                    "confidence": 0.6
+                }
+
+            # Update context for next interaction
+            context['last_agent'] = classification['primary_intent']
+            context['last_input'] = user_input
+            context['last_response'] = final_response_dict.get('message')
+            context['last_classification'] = classification
 
             # --- ALWAYS SEND THE REPLY (unless silent mode) ---
             message_to_send = final_response_dict.get('message')
             if message_to_send:
                 print(f"Orchestrator sending final reply to {phone_number}: '{message_to_send}'")
-                # --- [THE FIX] Removed 'await' because send_reply_message is a normal function ---
                 send_reply_message(
                     supabase_client=self.supabase, 
                     user_id=user_id, 
@@ -83,7 +130,6 @@ class Orchestrator:
         except Exception as e:
             traceback.print_exc()
             error_message = "I encountered an error while processing your request. Please try again."
-            # --- [THE FIX] Also removed 'await' here ---
             send_reply_message(self.supabase, user_id, phone_number, error_message)
             return {"message": "An internal error occurred.", "error": str(e)}
 
@@ -98,39 +144,29 @@ class Orchestrator:
             return False, None
 
     async def _classify_user_input(self, user_input, context):
-        """Classify the user input to determine the appropriate agent."""
-        user_input_lower = user_input.lower()
-        patterns = {
-            'task': ['task', 'todo', 'to-do', 'to do', 'add task', 'create task', 'new task', 'complete task', 'finish task'],
-            'reminder': ['remind', 'reminder', 'alert', 'notify', 'at time', 'on date'],
-            'silent_mode': ['silent mode', 'go silent', 'stop replying', 'no replies', 'exit silent', 'end silent'],
-            'coder': ['code', 'script', 'program', 'function', 'coding', 'programming', 'develop'],
-            'audit': ['activity', 'log', 'history', 'what did i', 'what have i', 'show me what'],
-            'expert': ['advice', 'best way', 'how should i', 'tips', 'strategy', 'recommend'],
-            'guide': ['how to', 'guide', 'steps', 'instructions', 'process', 'explain how']
-        }
-        for agent_type, keywords in patterns.items():
-            for keyword in keywords:
-                if f" {keyword} " in f" {user_input_lower} " or user_input_lower.startswith(keyword + ' ') or user_input_lower.endswith(' ' + keyword):
-                    return {"classification": agent_type, "agent_type": agent_type, "confidence": 0.9, "reasoning": f"Strong match with '{keyword}' pattern"}
-        scores = {agent: 0.0 for agent in patterns.keys()}
-        for agent_type, keywords in patterns.items():
-            for keyword in keywords:
-                if keyword in user_input_lower: scores[agent_type] += 0.3
-        last_agent = context.get('last_agent')
-        if last_agent and last_agent in scores: scores[last_agent] += 0.1
-        highest_score = max(scores.values())
-        if highest_score > 0:
-            best_agent = max(scores.items(), key=lambda x: x[1])[0]
-            return {"classification": best_agent, "agent_type": best_agent, "confidence": highest_score, "reasoning": "Best match based on keyword patterns"}
-        return {"classification": "task", "agent_type": "task", "confidence": 0.3, "reasoning": "No clear pattern match, defaulting to task agent"}
+        """AI-powered intent classification - REPLACES old keyword system"""
+        return await self.intent_classifier.classify_intent(user_input, context)
 
     async def _get_or_create_context(self, user_id, conversation_id=None):
         """Get or create the context for this user and conversation."""
         context_key = f"{user_id}:{conversation_id or 'default'}"
         if context_key not in self.user_contexts:
             self.user_contexts[context_key] = {
-                'user_id': user_id, 'conversation_id': conversation_id, 'created_at': datetime.now().isoformat(),
-                'last_agent': None, 'last_input': None, 'last_response': None, 'memory': {}
+                'user_id': user_id, 
+                'conversation_id': conversation_id, 
+                'created_at': datetime.now().isoformat(),
+                'last_agent': None, 
+                'last_input': None, 
+                'last_response': None, 
+                'last_classification': None,
+                'history': [],  # NEW: Track conversation history
+                'preferences': {},  # NEW: User preferences
+                'memory': {}
             }
-        return self.user_contexts[context_key]
+        
+        # Update conversation history
+        context = self.user_contexts[context_key]
+        if len(context['history']) > 10:  # Keep last 10 interactions
+            context['history'] = context['history'][-10:]
+            
+        return context
