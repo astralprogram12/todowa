@@ -41,15 +41,19 @@ def test_list_ai_actions():
     """A simple test endpoint to fetch AI Actions directly, bypassing the AI."""
     print("\n--- RUNNING DIRECT DATABASE TEST FOR AI ACTIONS ---")
     
-    # Replace this placeholder with an actual user_id from your database.
-    test_user_id = 'cf750539-b5f8-41fa-be5b-41298e19547d' # !!! IMPORTANT !!!
+    # !!! IMPORTANT !!!
+    # REPLACE this placeholder with YOUR actual user_id from the Supabase screenshot.
+    test_user_id = 'cf750539-b5f8-41fa-be5b-41298e19547d'
     
     try:
+        # Make sure supabase is initialized
         if not supabase:
             return jsonify({"error": "Supabase client not initialized"}), 500
         
+        # Import database functions through supabase_integration
         from src.multi_agent_system.tool_collections.database_tools import get_all_active_ai_actions
         
+        # Query actions
         actions = get_all_active_ai_actions(supabase, test_user_id)
         return jsonify({"success": True, "actions": actions})
     except Exception as e:
@@ -62,7 +66,7 @@ def test_list_ai_actions():
 def webhook():
     """Main webhook endpoint for processing incoming messages."""
     try:
-        # Step 1: Get the raw request body as text. This is the most reliable way.
+        # Step 1: Get the raw request body as text.
         raw_data = request.get_data(as_text=True)
 
         if not raw_data:
@@ -79,18 +83,23 @@ def webhook():
         # Step 3: Verify that the parsed data is a dictionary.
         if not isinstance(data, dict):
             print(f"Webhook Error: JSON did not parse into a dictionary. Type: {type(data)}")
-            return jsonify({"error": "Request body must be a JSON object (dictionary)"}), 400
+            return jsonify({"error": "Request body must be a JSON object"}), 400
 
-        # --- From this point on, 'data' is guaranteed to be a dictionary ---
         print(f"Webhook successfully parsed data: {data}")
 
-        # Step 4: Safely extract user ID and message text using .get()
-        user_id = data.get('user_id')
-        message_text = data.get('message', {}).get('text', '')
+        # Step 4: Extract user ID and message text based on the CORRECT JSON structure.
+        # This logic is now matched to the data you received.
         
+        # Using 'pengirim' for the user ID. Fallback to 'sender' if it doesn't exist.
+        user_id = data.get('pengirim') or data.get('sender')
+        
+        # Using 'pesan' for the message text. Fallback to 'message' if it doesn't exist.
+        message_text = data.get('pesan') or data.get('message')
+
+        # Step 5: Validate that we found the necessary data.
         if not user_id or not message_text:
-            print(f"Webhook Error: Missing 'user_id' or 'text'. UserID: {user_id}, Message: {message_text}")
-            return jsonify({"error": "Missing user_id or message text in JSON body"}), 400
+            print(f"Webhook Error: Missing 'pengirim'/'sender' or 'pesan'/'message'. UserID: {user_id}, Message: {message_text}")
+            return jsonify({"error": "Missing user identifier or message text in JSON body"}), 400
         
         # Ensure the agent system is ready before processing
         if multi_agent_system is None:
