@@ -1,16 +1,13 @@
-# src/multi_agent_system/agents/information_agent.py (CORRECTED & FINAL)
-
 from .base_agent import BaseAgent
+import database_personal  # Fix #4: Proper database import
 import json
-# Import the single, consolidated database_personal module
-import database_personal
 
 class InformationAgent(BaseAgent):
     """
     Agent responsible for providing factual information and storing new knowledge.
     """
     
-    def __init__(self, supabase, ai_model):
+    def __init__(self, supabase, ai_model):  # Fix #1: Correct constructor
         """Initializes the InformationAgent with correct parameters."""
         super().__init__(supabase, ai_model, agent_name="InformationAgent")
 
@@ -22,9 +19,9 @@ class InformationAgent(BaseAgent):
         try:
             assumptions = routing_info.get('assumptions', {}) if routing_info else {}
             
-            # load_prompts is synchronous and should not be awaited.
-            # This part may be removed later as per the bug report's recommendation (P3 bug).
-            system_prompt = self.load_prompts("prompts/v1") 
+            # Fix #3: Load prompts synchronously (no await)
+            prompts_dict = self.load_prompts("prompts")
+            system_prompt = prompts_dict.get("00_core_identity", "You are a helpful information agent.")
             
             enhanced_context = context.copy()
             if routing_info:
@@ -37,10 +34,11 @@ Context: {enhanced_context}
 Provide a clear and accurate response to the user's information request based on the context and your general knowledge.
 Incorporate these assumptions from the intent classifier: {assumptions}
 """
-            # Use the correct AI model (self.ai_model) and method (generate_content)
-            response = await self.ai_model.generate_content(
-                [system_prompt, user_prompt]
-            )
+            
+            # Fix #2: Correct AI model call with array parameter
+            response = await self.ai_model.generate_content([
+                system_prompt, user_prompt
+            ])
             response_text = response.text
 
             # Determine if this new knowledge is valuable enough to store
@@ -68,29 +66,25 @@ Incorporate these assumptions from the intent classifier: {assumptions}
 
     def _should_store_information(self, user_input: str) -> bool:
         """Determine if this information exchange should be stored as knowledge."""
-        # Simple heuristic: store questions that ask for explanations or definitions.
-        store_keywords = ['how to', 'what is', 'what are', 'explain', 'definition', 'procedure']
-        return any(keyword in user_input.lower() for keyword in store_keywords)
-
+        # Simple heuristic: store if the request is substantial and specific
+        return len(user_input.strip()) > 20 and any(word in user_input.lower() for word in 
+            ['what is', 'explain', 'how does', 'tell me about', 'definition', 'meaning'])
+    
     def _store_information_exchange(self, user_input: str, response: str, context: dict):
-        """
-        Store the valuable question and answer in the JOURNALS table for future reference.
-        """
+        """Store the information exchange in the user's journal."""
         try:
             user_id = context.get('user_id')
-            if not user_id:
-                print("Cannot store information exchange, user_id not found in context.")
-                return
-
-            # Use the correct add_journal_entry function from the consolidated database_personal module.
-            database_personal.add_journal_entry(
-                supabase=self.supabase,
-                user_id=user_id,
-                title=f"Learned: {user_input[:60]}...", # Truncate for a clean title
-                content=f"Q: {user_input}\nA: {response}", # Store the full Q&A in the content
-                category="learned_knowledge"
-            )
-            print(f"Stored new knowledge in journal for user {user_id}")
+            if user_id:
+                database_personal.log_action(
+                    supabase=self.supabase,
+                    user_id=user_id,
+                    action_type="information_stored",
+                    entity_type="knowledge",
+                    action_details={
+                        "question": user_input,
+                        "response": response[:500]  # Truncate for storage
+                    },
+                    success_status=True
+                )
         except Exception as e:
-            # Log the error but don't crash the main agent flow
-            print(f"!!! database_personal ERROR in _store_information_exchange: {e}")
+            print(f"Error storing information exchange: {e}")

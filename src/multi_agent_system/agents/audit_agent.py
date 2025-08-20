@@ -1,11 +1,10 @@
-# Audit Agent - handles audit and activity logging operations
-
 from .base_agent import BaseAgent
+import database_personal  # Fix #4: Proper database import
 
 class AuditAgent(BaseAgent):
     """Agent for handling audit and activity logging operations."""
     
-    def __init__(self, supabase, ai_model):
+    def __init__(self, supabase, ai_model):  # Fix #1: Correct constructor
         super().__init__(supabase, ai_model, "AuditAgent")
     
     async def process(self, user_input, context, routing_info=None):
@@ -43,6 +42,13 @@ class AuditAgent(BaseAgent):
                 "message": "I'm not sure what audit operation you want to perform. Please try again with a clearer request."
             }
     
+    def _apply_ai_assumptions(self, context, routing_info):
+        """Apply AI assumptions to enhance the context"""
+        enhanced_context = context.copy()
+        if routing_info:
+            enhanced_context.update(routing_info.get('assumptions', {}))
+        return enhanced_context
+    
     def _determine_operation(self, user_input):
         """Determine the audit operation from the user input."""
         user_input_lower = user_input.lower()
@@ -59,21 +65,19 @@ class AuditAgent(BaseAgent):
     async def _view_activity(self, user_id, user_input, context):
         """View recent user activity."""
         try:
-            # Query the user's recent activity from the database
-            from database_personal import get_user_activity
-            
             # Determine the time range from the user input
             days = self._extract_time_range(user_input)
             
-            # Get the activity
-            activity = get_user_activity(
+            # Get the activity using correct database function
+            activity = database_personal.get_user_activity(
                 supabase=self.supabase,
                 user_id=user_id,
                 days=days or 7  # Default to 7 days
             )
             
             # Log the action
-            self._log_action(
+            database_personal.log_action(
+                supabase=self.supabase,
                 user_id=user_id,
                 action_type="view_activity",
                 entity_type="audit",
@@ -99,81 +103,139 @@ class AuditAgent(BaseAgent):
             }
             
         except Exception as e:
-            error_msg = str(e)
-            
-            # Log the error
-            self._log_action(
-                user_id=user_id,
-                action_type="view_activity",
-                entity_type="audit",
-                action_details={
-                    "days": days or 7
-                },
-                success_status=False,
-                error_details=error_msg
-            )
-            
             return {
                 "status": "error",
-                "message": f"Failed to retrieve activity: {error_msg}"
+                "message": f"Error retrieving activity: {str(e)}"
+            }
+    
+    async def _view_logs(self, user_id, user_input, context):
+        """View system logs."""
+        try:
+            # Get system logs using correct database function
+            logs = database_personal.get_system_logs(
+                supabase=self.supabase,
+                user_id=user_id,
+                limit=50
+            )
+            
+            if not logs:
+                return {
+                    "status": "ok",
+                    "message": "No recent logs found."
+                }
+            
+            formatted_logs = self._format_logs(logs)
+            
+            return {
+                "status": "ok",
+                "message": "Here are your recent system logs:",
+                "logs": formatted_logs
+            }
+            
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Error retrieving logs: {str(e)}"
+            }
+    
+    async def _filter_activity(self, user_id, user_input, context):
+        """Filter user activity based on criteria."""
+        try:
+            # Extract filter criteria from user input
+            filters = self._extract_filters(user_input)
+            
+            # Get filtered activity
+            activity = database_personal.get_filtered_activity(
+                supabase=self.supabase,
+                user_id=user_id,
+                **filters
+            )
+            
+            if not activity:
+                return {
+                    "status": "ok",
+                    "message": "No activity found matching your criteria."
+                }
+            
+            formatted_activity = self._format_activity(activity)
+            
+            return {
+                "status": "ok",
+                "message": "Here's the filtered activity:",
+                "activity": formatted_activity
+            }
+            
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Error filtering activity: {str(e)}"
             }
     
     def _extract_time_range(self, user_input):
-        """Extract the time range from the user input."""
-        import re
+        """Extract time range in days from user input."""
+        user_input_lower = user_input.lower()
         
-        # Look for patterns like "past 7 days" or "last 30 days"
-        time_patterns = [
-            r'past (\d+) days',
-            r'last (\d+) days',
-            r'(\d+) days',
-            r'past (\d+) day',
-            r'last (\d+) day',
-            r'(\d+) day'
-        ]
-        
-        for pattern in time_patterns:
-            match = re.search(pattern, user_input.lower())
-            if match:
-                return int(match.group(1))
+        if 'today' in user_input_lower:
+            return 1
+        elif 'week' in user_input_lower:
+            return 7
+        elif 'month' in user_input_lower:
+            return 30
+        else:
+            # Try to extract number of days
+            import re
+            days_match = re.search(r'(\d+)\s*days?', user_input_lower)
+            if days_match:
+                return int(days_match.group(1))
         
         return None
     
-    def _format_activity(self, activity):
-        """Format the activity data for display."""
-        formatted = []
+    def _extract_filters(self, user_input):
+        """Extract filter criteria from user input."""
+        filters = {}
+        user_input_lower = user_input.lower()
         
+        # Extract action type filter
+        if 'tasks' in user_input_lower:
+            filters['action_type'] = 'task'
+        elif 'conversations' in user_input_lower:
+            filters['action_type'] = 'conversation'
+        
+        # Extract date filter
+        days = self._extract_time_range(user_input)
+        if days:
+            filters['days'] = days
+        
+        return filters
+    
+    def _format_activity(self, activity):
+        """Format activity data for display."""
+        if not activity:
+            return []
+        
+        formatted = []
         for item in activity:
-            # Convert timestamp to user's timezone
-            timestamp = item.get('created_at')
-            if timestamp:
-                local_time = self.convert_utc_to_user_timezone(
-                    user_id=item.get('user_id'),
-                    utc_time_str=timestamp
-                )
-            else:
-                local_time = "Unknown time"
-            
-            # Format the activity item
-            formatted_item = {
-                "time": local_time,
-                "action": item.get('action_type', 'Unknown action'),
-                "entity": item.get('entity_type', 'Unknown entity'),
-                "status": "Successful" if item.get('success_status') else "Failed",
-                "details": item.get('action_details', {})
-            }
-            
-            formatted.append(formatted_item)
+            formatted.append({
+                'time': item.get('created_at', ''),
+                'action': item.get('action_type', 'Unknown'),
+                'entity': item.get('entity_type', ''),
+                'details': item.get('action_details', {})
+            })
         
         return formatted
     
-    # Placeholder methods for other audit operations
-    async def _view_logs(self, user_id, user_input, context):
-        """View system logs."""
-        # TODO: Implement log viewing logic
-        return {"status": "ok", "message": "Log viewing functionality not yet implemented."}
-    
-    async def _filter_activity(self, user_id, user_input, context):
-        """Filter activity based on criteria."""
-        # TODO: Implement activity filtering logic
-        return {"status": "ok", "message": "Activity filtering functionality not yet implemented."}
+    def _format_logs(self, logs):
+        """Format log data for display."""
+        if not logs:
+            return []
+        
+        formatted = []
+        for log in logs:
+            formatted.append({
+                'time': log.get('created_at', ''),
+                'level': log.get('level', 'INFO'),
+                'message': log.get('message', ''),
+                'details': log.get('details', {})
+            })
+        
+        return formatted

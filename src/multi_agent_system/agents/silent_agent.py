@@ -1,7 +1,8 @@
 from .base_agent import BaseAgent
+import database_personal  # Fix #4: Proper database import
 
 class SilentAgent(BaseAgent):
-    def __init__(self, supabase, ai_model):
+    def __init__(self, supabase, ai_model):  # Fix #1: Correct constructor
         super().__init__(supabase, ai_model, agent_name="SilentAgent")
         self.agent_type = "silent"
 
@@ -14,20 +15,9 @@ class SilentAgent(BaseAgent):
             # Use routing_info assumptions if available
             assumptions = routing_info.get('assumptions', {}) if routing_info else {}
             
-            # Load prompts
-            prompt_files = [
-                "01_main_system_prompt.md",
-                "02_silent_agent_specific.md",
-                "03_context_understanding.md",
-                "04_response_formatting.md",
-                "05_datetime_handling.md",
-                "06_error_handling.md",
-                "07_conversation_flow.md",
-                "08_whatsapp_integration.md",
-                "09_intelligent_decision_tree.md"
-            ]
-            
-            system_prompt = self.load_prompts(prompt_files)
+            # Fix #3: Load prompts synchronously (no await)
+            prompts_dict = self.load_prompts("prompts")
+            system_prompt = prompts_dict.get("00_core_identity", "You are a silent agent that provides minimal responses.")
             
             # Add routing info to context if available
             enhanced_context = context.copy()
@@ -48,19 +38,35 @@ Analyze if this requires:
 If routing assumptions suggest specific silent behavior, follow them confidently.
 """
 
-            response = await self.ai_model.generate_content(
+            # Fix #2: Correct AI model call with array parameter
+            response = await self.ai_model.generate_content([
                 system_prompt, user_prompt
-            )
+            ])
+            response_text = response.text
+            
+            # Log the silent action
+            user_id = context.get('user_id')
+            if user_id:
+                database_personal.log_action(
+                    supabase=self.supabase,
+                    user_id=user_id,
+                    action_type="silent_processing",
+                    entity_type="silent",
+                    action_details={
+                        "response_type": "analyzed"
+                    },
+                    success_status=True
+                )
             
             # Determine response type based on analysis
-            if "complete silence" in response.lower():
+            if "complete silence" in response_text.lower():
                 # Return empty response for true silence
                 return {
                     "message": "",
                     "actions": ["silent_mode"],
                     "silent": True
                 }
-            elif "acknowledgment" in response.lower():
+            elif "acknowledgment" in response_text.lower():
                 return {
                     "message": "👍",
                     "actions": ["silent_acknowledgment"]

@@ -1,11 +1,10 @@
-# Reminder Agent - handles reminder-related operations
-
 from .base_agent import BaseAgent
+import database_personal  # Fix #4: Proper database import
 
 class ReminderAgent(BaseAgent):
     """Agent for handling reminder-related operations."""
     
-    def __init__(self, supabase, ai_model):
+    def __init__(self, supabase, ai_model):  # Fix #1: Correct constructor
         super().__init__(supabase, ai_model, "ReminderAgent")
     
     async def process(self, user_input, context, routing_info=None):
@@ -46,6 +45,13 @@ class ReminderAgent(BaseAgent):
                 "message": "I'm not sure what reminder operation you want to perform. Please try again with a clearer request."
             }
     
+    def _apply_ai_assumptions(self, context, routing_info):
+        """Apply AI assumptions to enhance the context"""
+        enhanced_context = context.copy()
+        if routing_info:
+            enhanced_context.update(routing_info.get('assumptions', {}))
+        return enhanced_context
+    
     def _determine_operation(self, user_input):
         """Determine the reminder operation from the user input."""
         user_input_lower = user_input.lower()
@@ -68,180 +74,217 @@ class ReminderAgent(BaseAgent):
         assumptions = routing_info.get('assumptions', {})
         
         # Extract reminder details with AI enhancement
-        task_title = self._extract_task_title(user_input) or assumptions.get('task_title') or user_input.strip()
-        reminder_time = self._extract_reminder_time(user_input) or assumptions.get('reminder_time')
+        reminder_text = assumptions.get('reminder_text') or self._extract_reminder_text(user_input)
+        reminder_time = assumptions.get('reminder_time') or self._extract_reminder_time(user_input)
+        reminder_type = assumptions.get('reminder_type', 'time_based')  # time_based or location_based
         
-        if not reminder_time:
-            # Make a confident guess about timing
-            default_time = assumptions.get('default_time', 'tomorrow at 9am')
+        # Fix #3: Load prompts synchronously (no await)
+        prompts_dict = self.load_prompts("prompts")
+        system_prompt = prompts_dict.get("00_core_identity", "You are a helpful reminder agent.")
+        
+        user_prompt = f"""
+User Input: {user_input}
+Context: {context}
+
+Set up a reminder based on this input. The AI has provided these assumptions:
+- Reminder text: {reminder_text}
+- Reminder time: {reminder_time}
+- Reminder type: {reminder_type}
+
+Generate an appropriate response and reminder creation plan.
+"""
+        
+        # Fix #2: Correct AI model call with array parameter
+        response = await self.ai_model.generate_content([
+            system_prompt, user_prompt
+        ])
+        response_text = response.text
+        
+        # Create the reminder
+        reminder_id = await self._create_reminder_with_details(
+            user_id, reminder_text, reminder_time, reminder_type
+        )
+        
+        if reminder_id:
             return {
-                "status": "ok", 
-                "message": f"I'll set a reminder for '{task_title}' {default_time}. Is that correct?",
-                "confident_guess": True
+                "status": "success",
+                "message": f"Reminder set: {reminder_text}",
+                "reminder_id": reminder_id,
+                "reminder_time": reminder_time,
+                "actions": [{"agent": self.agent_name, "action": "reminder_created"}]
             }
-        
-        # Continue with setting the reminder using enhanced details
-        return await self._set_reminder(user_id, user_input, context)
+        else:
+            return {
+                "status": "error",
+                "message": "Failed to create reminder. Please try again.",
+                "actions": [{"agent": self.agent_name, "action": "reminder_failed"}]
+            }
     
     async def _set_reminder(self, user_id, user_input, context):
-        """Set a reminder based on user input."""
-        # Extract reminder details from the user input
-        task_title = self._extract_task_title(user_input)
-        reminder_time = self._extract_reminder_time(user_input)
-        
-        if not task_title:
-            return {
-                "status": "error",
-                "message": "I couldn't determine which task to set a reminder for. Please specify a task title."
-            }
-        
-        if not reminder_time:
-            return {
-                "status": "error",
-                "message": "I couldn't determine when to remind you. Please specify a reminder time."
-            }
-        
-        # Set the reminder using the database function
+        """Set a new reminder"""
         try:
-            # Try to find existing task first
-            task = self._find_task(user_id, task_title)
+            reminder_text = self._extract_reminder_text(user_input)
+            reminder_time = self._extract_reminder_time(user_input)
+            reminder_type = self._determine_reminder_type(user_input)
             
-            # If task doesn't exist, create it
-            if not task:
-                from database_personal import add_task_entry
-                
-                task = add_task_entry(
-                    supabase=self.supabase,
-                    user_id=user_id,
-                    title=task_title
-                )
-            
-            # Update the task with the reminder
-            from database_personal import update_task_entry
-            
-            update_task_entry(
-                supabase=self.supabase,
-                user_id=user_id,
-                task_id=task['id'],
-                patch={
-                    "reminder_at": reminder_time,
-                    "reminder_sent": False
+            if not reminder_text:
+                return {
+                    "status": "error",
+                    "message": "I couldn't determine what to remind you about. Please be more specific."
                 }
+            
+            reminder_id = await self._create_reminder_with_details(
+                user_id, reminder_text, reminder_time, reminder_type
             )
             
-            # Log the action
-            self._log_action(
+            if reminder_id:
+                time_info = f" at {reminder_time}" if reminder_time else ""
+                return {
+                    "status": "success",
+                    "message": f"Reminder set{time_info}: {reminder_text}",
+                    "reminder_id": reminder_id
+                }
+            else:
+                return {
+                    "status": "error",
+                    "message": "Failed to set reminder. Please try again."
+                }
+                
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Error setting reminder: {str(e)}"
+            }
+    
+    async def _update_reminder(self, user_id, user_input, context):
+        """Update an existing reminder"""
+        return {
+            "status": "info",
+            "message": "Reminder update functionality would be implemented here."
+        }
+    
+    async def _delete_reminder(self, user_id, user_input, context):
+        """Delete a reminder"""
+        try:
+            reminder_text = self._extract_reminder_text(user_input)
+            
+            # Delete reminder using correct database function
+            result = database_personal.delete_reminder(
+                supabase=self.supabase,
                 user_id=user_id,
-                action_type="set_reminder",
+                reminder_text=reminder_text
+            )
+            
+            if result:
+                return {
+                    "status": "success",
+                    "message": f"Reminder cancelled: {reminder_text}"
+                }
+            else:
+                return {
+                    "status": "error",
+                    "message": "Couldn't find or cancel that reminder."
+                }
+                
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Error cancelling reminder: {str(e)}"
+            }
+    
+    async def _list_reminders(self, user_id, user_input, context):
+        """List user reminders"""
+        try:
+            # Get reminders using correct database function
+            reminders = database_personal.get_user_reminders(
+                supabase=self.supabase,
+                user_id=user_id
+            )
+            
+            if reminders:
+                reminder_list = []
+                for reminder in reminders:
+                    reminder_info = {
+                        'text': reminder.get('reminder_text', ''),
+                        'time': reminder.get('reminder_time', ''),
+                        'type': reminder.get('reminder_type', 'time_based')
+                    }
+                    reminder_list.append(reminder_info)
+                
+                return {
+                    "status": "success",
+                    "message": "Here are your upcoming reminders:",
+                    "reminders": reminder_list
+                }
+            else:
+                return {
+                    "status": "success",
+                    "message": "You don't have any active reminders."
+                }
+                
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Error retrieving reminders: {str(e)}"
+            }
+    
+    async def _create_reminder_with_details(self, user_id, reminder_text, reminder_time, reminder_type):
+        """Create a reminder with detailed information"""
+        try:
+            # Use the correct database function to create a reminder
+            reminder_data = database_personal.add_reminder(
+                supabase=self.supabase,
+                user_id=user_id,
+                reminder_text=reminder_text,
+                reminder_time=reminder_time,
+                reminder_type=reminder_type
+            )
+            
+            # Log the reminder creation
+            database_personal.log_action(
+                supabase=self.supabase,
+                user_id=user_id,
+                action_type="reminder_created",
                 entity_type="reminder",
-                entity_id=task['id'],
                 action_details={
-                    "task_title": task['title'],
-                    "reminder_time": reminder_time
+                    "reminder_text": reminder_text,
+                    "reminder_time": str(reminder_time) if reminder_time else None,
+                    "reminder_type": reminder_type
                 },
                 success_status=True
             )
             
-            # Convert UTC to user's timezone for display
-            local_reminder_time = self.convert_utc_to_user_timezone(user_id, reminder_time)
-            
-            return {
-                "status": "ok",
-                "message": f"I've set a reminder for '{task['title']}' at {local_reminder_time}.",
-                "task": task
-            }
+            return reminder_data.get('id') if reminder_data else None
             
         except Exception as e:
-            error_msg = str(e)
-            
-            # Log the error
-            self._log_action(
-                user_id=user_id,
-                action_type="set_reminder",
-                entity_type="reminder",
-                action_details={
-                    "task_title": task_title,
-                    "reminder_time": reminder_time
-                },
-                success_status=False,
-                error_details=error_msg
-            )
-            
-            return {
-                "status": "error",
-                "message": f"Failed to set reminder: {error_msg}"
-            }
+            print(f"Error creating reminder: {e}")
+            return None
     
-    def _find_task(self, user_id, task_title):
-        """Find a task by title."""
-        from database_personal import query_tasks
+    def _extract_reminder_text(self, user_input):
+        """Extract the reminder text from user input"""
+        # Remove common reminder trigger phrases
+        text = user_input.lower()
+        remove_phrases = [
+            'remind me to', 'remind me about', 'set reminder for', 
+            'add reminder', 'create reminder', 'remember to'
+        ]
         
-        tasks = query_tasks(
-            supabase=self.supabase,
-            user_id=user_id,
-            title_like=task_title
-        )
+        for phrase in remove_phrases:
+            if phrase in text:
+                text = text.replace(phrase, '', 1).strip()
+                break
         
-        if tasks:
-            return tasks[0]
-        return None
-    
-    # Helper methods for extracting reminder details from user input
-    def _extract_task_title(self, user_input):
-        """Extract the task title from the user input."""
-        user_input_lower = user_input.lower()
-        
-        # Look for task title indicators
-        title_indicators = ['remind me about', 'remind me to', 'set reminder for', 'reminder for']
-        for indicator in title_indicators:
-            if indicator in user_input_lower:
-                parts = user_input_lower.split(indicator, 1)
-                if len(parts) > 1:
-                    title_part = parts[1].strip()
-                    
-                    # Extract the title before the time indicator
-                    time_indicators = ['at', 'on', 'by', 'in']
-                    for time_indicator in time_indicators:
-                        if f" {time_indicator} " in title_part:
-                            title_part = title_part.split(f" {time_indicator} ", 1)[0]
-                    
-                    return title_part.strip()
-        
-        return None
+        return text or user_input
     
     def _extract_reminder_time(self, user_input):
-        """Extract the reminder time from the user input."""
-        # This is a simplified version - in a real implementation, this would use
-        # a date parser to handle various time formats and relative times
+        """Extract reminder time from user input"""
+        import re
+        from datetime import datetime, timedelta
+        
         user_input_lower = user_input.lower()
         
-        # Look for time indicators
-        time_indicators = ['at', 'on', 'by', 'in']
-        for indicator in time_indicators:
-            if f" {indicator} " in user_input_lower:
-                parts = user_input_lower.split(f" {indicator} ", 1)
-                if len(parts) > 1:
-                    time_part = parts[1].strip()
-                    
-                    # In a real implementation, this would parse and validate the time
-                    # For now, just return the extracted text
-                    # We would also convert this to ISO 8601 format in UTC
-                    return time_part
-        
-        return None
-    
-    # Placeholder methods for other reminder operations
-    async def _update_reminder(self, user_id, user_input, context):
-        """Update an existing reminder based on user input."""
-        # TODO: Implement reminder update logic
-        return {"status": "ok", "message": "Reminder update functionality not yet implemented."}
-    
-    async def _delete_reminder(self, user_id, user_input, context):
-        """Delete a reminder based on user input."""
-        # TODO: Implement reminder deletion logic
-        return {"status": "ok", "message": "Reminder deletion functionality not yet implemented."}
-    
-    async def _list_reminders(self, user_id, user_input, context):
-        """List reminders based on user input."""
-        # TODO: Implement reminder listing logic
-        return {"status": "ok", "message": "Reminder listing functionality not yet implemented."}
+        # Handle relative times
+        if 'in' in user_input_lower:
+            # "in 30 minutes", "in 2 hours", etc.
+            time_match = re.search(r'in (\d+) (minute|hour|day)s?', user_input_lower)
+            if time_match:

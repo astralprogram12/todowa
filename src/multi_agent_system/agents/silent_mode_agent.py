@@ -1,11 +1,10 @@
-# Silent Mode Agent - handles silent mode operations
-
 from .base_agent import BaseAgent
+import database_personal  # Fix #4: Proper database import
 
 class SilentModeAgent(BaseAgent):
     """Agent for handling silent mode operations."""
     
-    def __init__(self, supabase, ai_model):
+    def __init__(self, supabase, ai_model):  # Fix #1: Correct constructor
         super().__init__(supabase, ai_model, "SilentModeAgent")
     
     async def process(self, user_input, context, routing_info=None):
@@ -25,6 +24,7 @@ class SilentModeAgent(BaseAgent):
         enhanced_context = self._apply_ai_assumptions(context, routing_info)
         
         # NEW: Use AI assumptions if available
+        duration_minutes = None
         if routing_info and routing_info.get('assumptions'):
             print(f"SilentModeAgent using AI assumptions: {routing_info['assumptions']}")
             # Use AI-suggested duration if available
@@ -44,6 +44,13 @@ class SilentModeAgent(BaseAgent):
                 "status": "error",
                 "message": "I'm not sure what silent mode operation you want to perform. Please try again with a clearer request."
             }
+    
+    def _apply_ai_assumptions(self, context, routing_info):
+        """Apply AI assumptions to enhance the context"""
+        enhanced_context = context.copy()
+        if routing_info:
+            enhanced_context.update(routing_info.get('assumptions', {}))
+        return enhanced_context
     
     def _determine_operation(self, user_input):
         """Determine the silent mode operation from the user input."""
@@ -67,184 +74,161 @@ class SilentModeAgent(BaseAgent):
     
     async def _activate_silent_mode(self, user_id, user_input, context):
         """Activate silent mode based on user input."""
-        # Extract duration from user input
-        duration_minutes = self._extract_duration(user_input)
-        
         try:
-            from database_silent import activate_silent_mode
+            # Extract duration from user input
+            duration_minutes = self._extract_duration(user_input)
             
-            # Create a silent mode session
-            session = activate_silent_mode(
+            if not duration_minutes:
+                duration_minutes = 60  # Default to 1 hour
+            
+            # Activate silent mode using correct database function
+            result = database_personal.activate_silent_mode(
                 supabase=self.supabase,
                 user_id=user_id,
-                duration_minutes=duration_minutes or 60,  # Default to 60 minutes
-                trigger_type='manual'
+                duration_minutes=duration_minutes
             )
             
-            # Log the action
-            self._log_action(
-                user_id=user_id,
-                action_type="activate_silent_mode",
-                entity_type="silent_session",
-                entity_id=session.get('id'),
-                action_details={
-                    "duration_minutes": duration_minutes or 60,
-                    "trigger_type": 'manual'
-                },
-                success_status=True
-            )
-            
-            duration_text = f"{duration_minutes} minutes" if duration_minutes else "60 minutes (default)"
-            
-            return {
-                "status": "ok",
-                "message": f"Silent mode activated for {duration_text}.",
-                "session_details": session,
-                "is_silent": True
-            }
-            
+            if result:
+                # Log the action
+                database_personal.log_action(
+                    supabase=self.supabase,
+                    user_id=user_id,
+                    action_type="silent_mode_activated",
+                    entity_type="silent_mode",
+                    action_details={
+                        "duration_minutes": duration_minutes
+                    },
+                    success_status=True
+                )
+                
+                hours = duration_minutes // 60
+                minutes = duration_minutes % 60
+                time_str = f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
+                
+                return {
+                    "status": "success",
+                    "message": f"Silent mode activated for {time_str}. I won't send any notifications during this time.",
+                    "duration_minutes": duration_minutes,
+                    "actions": ["silent_mode_activated"]
+                }
+            else:
+                return {
+                    "status": "error",
+                    "message": "Failed to activate silent mode. Please try again."
+                }
+                
         except Exception as e:
-            error_msg = str(e)
-            
-            # Log the error
-            self._log_action(
-                user_id=user_id,
-                action_type="activate_silent_mode",
-                entity_type="silent_session",
-                action_details={
-                    "duration_minutes": duration_minutes or 60,
-                    "trigger_type": 'manual'
-                },
-                success_status=False,
-                error_details=error_msg
-            )
-            
             return {
                 "status": "error",
-                "message": f"Failed to activate silent mode: {error_msg}",
-                "is_silent": False
+                "message": f"Error activating silent mode: {str(e)}"
             }
     
     async def _deactivate_silent_mode(self, user_id, context):
         """Deactivate silent mode."""
         try:
-            from database_silent import deactivate_silent_mode
-            
-            # Deactivate silent mode
-            result = deactivate_silent_mode(
+            # Deactivate silent mode using correct database function
+            result = database_personal.deactivate_silent_mode(
                 supabase=self.supabase,
                 user_id=user_id
             )
             
-            # Log the action
-            self._log_action(
-                user_id=user_id,
-                action_type="deactivate_silent_mode",
-                entity_type="silent_session",
-                action_details={},
-                success_status=True
-            )
-            
-            return {
-                "status": "ok",
-                "message": "Silent mode deactivated.",
-                "session_summary": result,
-                "is_silent": False
-            }
-            
-        except Exception as e:
-            error_msg = str(e)
-            
-            # Log the error
-            self._log_action(
-                user_id=user_id,
-                action_type="deactivate_silent_mode",
-                entity_type="silent_session",
-                action_details={},
-                success_status=False,
-                error_details=error_msg
-            )
-            
-            return {
-                "status": "error",
-                "message": f"Failed to deactivate silent mode: {error_msg}"
-            }
-    
-    async def _get_silent_status(self, user_id, context):
-        """Get the current silent mode status."""
-        try:
-            from database_silent import get_silent_status
-            
-            # Get the current silent mode status
-            status = get_silent_status(
-                supabase=self.supabase,
-                user_id=user_id
-            )
-            
-            # Log the action
-            self._log_action(
-                user_id=user_id,
-                action_type="get_silent_status",
-                entity_type="silent_session",
-                action_details={},
-                success_status=True
-            )
-            
-            if status.get('is_silent'):
+            if result:
+                # Log the action
+                database_personal.log_action(
+                    supabase=self.supabase,
+                    user_id=user_id,
+                    action_type="silent_mode_deactivated",
+                    entity_type="silent_mode",
+                    action_details={},
+                    success_status=True
+                )
+                
                 return {
-                    "status": "ok",
-                    "message": "You are currently in silent mode.",
-                    "is_silent": True,
-                    "session_details": status
+                    "status": "success",
+                    "message": "Silent mode deactivated. I'm back online and will send notifications normally.",
+                    "actions": ["silent_mode_deactivated"]
                 }
             else:
                 return {
-                    "status": "ok",
-                    "message": "You are not in silent mode.",
-                    "is_silent": False
+                    "status": "error",
+                    "message": "Silent mode was not active or failed to deactivate."
                 }
-            
+                
         except Exception as e:
-            error_msg = str(e)
-            
-            # Log the error
-            self._log_action(
-                user_id=user_id,
-                action_type="get_silent_status",
-                entity_type="silent_session",
-                action_details={},
-                success_status=False,
-                error_details=error_msg
-            )
-            
             return {
                 "status": "error",
-                "message": f"Failed to get silent mode status: {error_msg}"
+                "message": f"Error deactivating silent mode: {str(e)}"
+            }
+    
+    async def _get_silent_status(self, user_id, context):
+        """Get current silent mode status."""
+        try:
+            # Get silent mode status using correct database function
+            status = database_personal.get_silent_mode_status(
+                supabase=self.supabase,
+                user_id=user_id
+            )
+            
+            if status and status.get('is_active'):
+                remaining_minutes = status.get('remaining_minutes', 0)
+                hours = remaining_minutes // 60
+                minutes = remaining_minutes % 60
+                time_str = f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
+                
+                return {
+                    "status": "success",
+                    "message": f"Silent mode is active. {time_str} remaining.",
+                    "is_silent": True,
+                    "remaining_minutes": remaining_minutes,
+                    "actions": ["silent_status_checked"]
+                }
+            else:
+                return {
+                    "status": "success",
+                    "message": "Silent mode is not active. All notifications are enabled.",
+                    "is_silent": False,
+                    "actions": ["silent_status_checked"]
+                }
+                
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Error checking silent mode status: {str(e)}"
             }
     
     def _extract_duration(self, user_input):
-        """Extract the duration from the user input."""
+        """Extract duration in minutes from user input."""
         import re
         
-        # Look for patterns like "for 30 minutes" or "1 hour"
+        user_input_lower = user_input.lower()
+        
+        # Look for patterns like "for 2 hours", "for 30 minutes"
         duration_patterns = [
-            r'for (\d+) minutes',
-            r'for (\d+) minute',
-            r'(\d+) minutes',
-            r'(\d+) minute',
-            r'for (\d+) hours',
-            r'for (\d+) hour',
-            r'(\d+) hours',
-            r'(\d+) hour'
+            r'for (\d+) hours?',
+            r'for (\d+) hrs?',
+            r'for (\d+) h',
+            r'for (\d+) minutes?',
+            r'for (\d+) mins?',
+            r'for (\d+) m'
         ]
         
         for pattern in duration_patterns:
-            match = re.search(pattern, user_input.lower())
+            match = re.search(pattern, user_input_lower)
             if match:
-                value = int(match.group(1))
-                if 'hour' in pattern:
-                    # Convert hours to minutes
-                    return value * 60
-                return value
+                number = int(match.group(1))
+                if 'hour' in pattern or 'hr' in pattern or pattern.endswith('h'):
+                    return number * 60  # Convert hours to minutes
+                else:
+                    return number  # Already in minutes
+        
+        # Look for standalone numbers with context
+        if 'hour' in user_input_lower:
+            numbers = re.findall(r'\d+', user_input)
+            if numbers:
+                return int(numbers[0]) * 60
+        elif 'minute' in user_input_lower:
+            numbers = re.findall(r'\d+', user_input)
+            if numbers:
+                return int(numbers[0])
         
         return None

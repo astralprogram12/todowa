@@ -1,7 +1,8 @@
 from .base_agent import BaseAgent
+import database_personal  # Fix #4: Proper database import
 
 class ContextAgent(BaseAgent):
-    def __init__(self, supabase, ai_model):
+    def __init__(self, supabase, ai_model):  # Fix #1: Correct constructor
         super().__init__(supabase, ai_model, agent_name="ContextAgent")
         self.agent_type = "context"
 
@@ -14,20 +15,9 @@ class ContextAgent(BaseAgent):
             # Use routing_info assumptions if available
             assumptions = routing_info.get('assumptions', {}) if routing_info else {}
             
-            # Load prompts
-            prompt_files = [
-                "01_main_system_prompt.md",
-                "02_context_agent_specific.md",
-                "03_context_understanding.md",
-                "04_response_formatting.md",
-                "05_datetime_handling.md",
-                "06_error_handling.md",
-                "07_conversation_flow.md",
-                "08_whatsapp_integration.md",
-                "09_intelligent_decision_tree.md"
-            ]
-            
-            system_prompt = self.load_prompts(prompt_files)
+            # Fix #3: Load prompts synchronously (no await)
+            prompts_dict = self.load_prompts("prompts")
+            system_prompt = prompts_dict.get("00_core_identity", "You are a helpful context management agent.")
             
             # Add routing info to context if available
             enhanced_context = context.copy()
@@ -51,15 +41,17 @@ If routing assumptions suggest specific context operations, apply them confident
 Provide an appropriate response that addresses the context needs.
 """
 
-            response = await self.ai_model.generate_content(
+            # Fix #2: Correct AI model call with array parameter
+            response = await self.ai_model.generate_content([
                 system_prompt, user_prompt
-            )
+            ])
+            response_text = response.text
             
             # Determine if context needs to be updated or retrieved
             context_action = await self._determine_context_action(user_input, assumptions)
             
             result = {
-                "message": response,
+                "message": response_text,
                 "actions": ["context_processed"],
                 "data": {
                     "context_action": context_action,
@@ -73,7 +65,7 @@ Provide an appropriate response that addresses the context needs.
                 result["data"]["history"] = history
                 result["actions"].append("history_retrieved")
             elif context_action == "update_context":
-                await self._update_conversation_context(enhanced_context, user_input, response)
+                await self._update_conversation_context(enhanced_context, user_input, response_text)
                 result["actions"].append("context_updated")
             
             return result
@@ -97,33 +89,32 @@ Provide an appropriate response that addresses the context needs.
     async def _retrieve_conversation_history(self, context):
         """Retrieve relevant conversation history"""
         try:
-            # Get recent conversation history from database
             user_id = context.get('user_id')
             if user_id:
-                history = await self.supabase_manager.get_records(
-                    'conversations',
-                    filters={'user_id': user_id},
-                    limit=10,
-                    order_by=[('created_at', 'desc')]
+                # Get conversation history using correct database function
+                history = database_personal.get_conversation_history(
+                    supabase=self.supabase,
+                    user_id=user_id,
+                    limit=10
                 )
                 return history
-            return []
         except Exception as e:
             print(f"Error retrieving conversation history: {e}")
-            return []
+        
+        return []
 
     async def _update_conversation_context(self, context, user_input, response):
-        """Update conversation context in database"""
+        """Update the conversation context"""
         try:
-            conversation_data = {
-                "user_id": context.get('user_id'),
-                "user_input": user_input,
-                "agent_response": response,
-                "context": context,
-                "timestamp": context.get('timestamp'),
-                "agent_type": "context"
-            }
-            
-            await self.supabase_manager.create_record('conversations', conversation_data)
+            user_id = context.get('user_id')
+            if user_id:
+                # Store conversation context using correct database function
+                database_personal.store_conversation_context(
+                    supabase=self.supabase,
+                    user_id=user_id,
+                    user_input=user_input,
+                    agent_response=response,
+                    context_data=context
+                )
         except Exception as e:
             print(f"Error updating conversation context: {e}")

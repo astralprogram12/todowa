@@ -1,7 +1,8 @@
 from .base_agent import BaseAgent
+import database_personal  # Fix #4: Proper database import
 
 class ActionAgent(BaseAgent):
-    def __init__(self, supabase, ai_model):
+    def __init__(self, supabase, ai_model):  # Fix #1: Correct constructor
         super().__init__(supabase, ai_model, agent_name="ActionAgent")
         self.agent_type = "action"
 
@@ -14,20 +15,9 @@ class ActionAgent(BaseAgent):
             # Use routing_info assumptions if available
             assumptions = routing_info.get('assumptions', {}) if routing_info else {}
             
-            # Load prompts
-            prompt_files = [
-                "01_main_system_prompt.md",
-                "02_action_agent_specific.md",
-                "03_context_understanding.md",
-                "04_response_formatting.md",
-                "05_datetime_handling.md",
-                "06_error_handling.md",
-                "07_conversation_flow.md",
-                "08_whatsapp_integration.md",
-                "09_intelligent_decision_tree.md"
-            ]
-            
-            system_prompt = await self.load_prompts(prompt_files)
+            # Fix #3: Load prompts synchronously (no await)
+            prompts_dict = self.load_prompts("prompts")
+            system_prompt = prompts_dict.get("01_main_system_prompt", "You are a helpful action agent.")
             
             # Add routing info to context if available
             enhanced_context = context.copy()
@@ -59,12 +49,14 @@ Available actions:
 Respond with the action plan and any confirmations needed.
 """
 
-            response = await self.ai_model.generate_content(
+            # Fix #2: Correct AI model call with array parameter
+            response = await self.ai_model.generate_content([
                 system_prompt, user_prompt
-            )
+            ])
+            response_text = response.text
             
             # Parse and execute the action
-            action_result = await self._execute_action(response, user_input, enhanced_context, assumptions)
+            action_result = await self._execute_action(response_text, user_input, enhanced_context, assumptions)
             
             return action_result
             
@@ -80,57 +72,46 @@ Respond with the action plan and any confirmations needed.
         try:
             # Parse the action plan to determine specific actions
             action_type = assumptions.get('action_type', 'general')
+            user_id = context.get('user_id')
             
-            if 'send' in action_plan.lower() or action_type == 'send':
-                return await self._handle_send_action(action_plan, context)
-            elif 'schedule' in action_plan.lower() or action_type == 'schedule':
-                return await self._handle_schedule_action(action_plan, context)
-            elif 'update' in action_plan.lower() or action_type == 'update':
-                return await self._handle_update_action(action_plan, context)
-            elif 'cancel' in action_plan.lower() or action_type == 'cancel':
-                return await self._handle_cancel_action(action_plan, context)
+            # Log the action using the correct database function
+            if user_id:
+                database_personal.log_action(
+                    supabase=self.supabase,
+                    user_id=user_id,
+                    action_type=action_type,
+                    entity_type="action_execution",
+                    action_details={"original_input": original_input},
+                    success_status=True
+                )
+            
+            if action_type == 'send_message':
+                return await self._handle_send_message(original_input, context, assumptions)
+            elif action_type == 'schedule':
+                return await self._handle_schedule_action(original_input, context, assumptions)
             else:
                 return {
-                    "message": action_plan,
-                    "actions": ["action_planned"],
-                    "requires_confirmation": True
+                    "message": "I've analyzed your request. What specific action would you like me to help you with?",
+                    "actions": ["action_analyzed"]
                 }
                 
         except Exception as e:
             return {
-                "message": f"Action execution failed: {str(e)}",
-                "actions": ["action_failed"],
+                "message": f"Error executing action: {str(e)}",
+                "actions": ["action_error"],
                 "error": str(e)
             }
-
-    async def _handle_send_action(self, action_plan, context):
-        """Handle sending messages or communications"""
+    
+    async def _handle_send_message(self, user_input, context, assumptions):
+        """Handle message sending actions"""
         return {
-            "message": "📤 Message sending functionality would be implemented here.",
-            "actions": ["send_message"],
-            "data": {"action_plan": action_plan}
+            "message": "I can help you send a message. What would you like to send and to whom?",
+            "actions": ["message_prompt"]
         }
-
-    async def _handle_schedule_action(self, action_plan, context):
-        """Handle scheduling future actions"""
+    
+    async def _handle_schedule_action(self, user_input, context, assumptions):
+        """Handle scheduling actions"""
         return {
-            "message": "📅 Scheduling functionality would be implemented here.",
-            "actions": ["schedule_action"],
-            "data": {"action_plan": action_plan}
-        }
-
-    async def _handle_update_action(self, action_plan, context):
-        """Handle updating settings or preferences"""
-        return {
-            "message": "⚙️ Update functionality would be implemented here.",
-            "actions": ["update_settings"],
-            "data": {"action_plan": action_plan}
-        }
-
-    async def _handle_cancel_action(self, action_plan, context):
-        """Handle canceling existing actions or schedules"""
-        return {
-            "message": "❌ Cancellation functionality would be implemented here.",
-            "actions": ["cancel_action"],
-            "data": {"action_plan": action_plan}
+            "message": "I can help you schedule an action. When would you like it to happen?",
+            "actions": ["schedule_prompt"]
         }
