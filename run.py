@@ -1,63 +1,69 @@
-#!/usr/bin/env python
-# run.py
-# Entry point for the enhanced multi-agent system
-
 import os
 import sys
+import google.generativeai as genai
+from supabase import create_client, Client
+from waitress import serve
 
-# Get current directory (where run.py is located)
+# --- 1. Add Project Directories to Python Path ---
+# This ensures that imports from 'app' and 'src' work correctly.
 current_dir = os.path.dirname(os.path.abspath(__file__))
-
-# Add current directory to path
 if current_dir not in sys.path:
     sys.path.append(current_dir)
 
-# Add src directory to path
 src_dir = os.path.join(current_dir, 'src')
 if src_dir not in sys.path:
     sys.path.append(src_dir)
 
-# Define prompt files directory
-prompts_dir = os.path.join(current_dir, 'prompts')
-if not os.path.exists(prompts_dir):
-    print(f"WARNING: Prompts directory not found at {prompts_dir}")
-
-# Import Supabase integration
-import supabase_integration
-
-# Import dependencies
-from supabase import create_client
-import google.generativeai as genai
+# --- 2. Import Your Application Code ---
+# We import the Flask app object from your app.py file
+from app import app
+# We import your multi-agent system orchestrator
+from src.multi_agent_system.orchestrator import create_multi_agent_system
+# We import your configuration
 import config
 
-# Configure services
-genai.configure(api_key=config.GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-2.5-flash-lite')
-supabase = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
+# --- 3. Initialize All Services and Inject Them ---
+# This code runs as soon as the file is imported, which is what Vercel needs.
 
-# Import multi-agent system
-from src.multi_agent_system.orchestrator import create_multi_agent_system
+print("--- INITIALIZING APPLICATION ---")
 
-# Create the multi-agent system
-# Pass the prompts directory to the orchestrator
-multi_agent_system = create_multi_agent_system(supabase, model, prompts_dir=prompts_dir)
+try:
+    # Configure Gemini AI Model
+    print("Initializing Google Generative AI...")
+    genai.configure(api_key=config.GEMINI_API_KEY)
+    model = genai.GenerativeModel('gemini-1.5-flash-latest')
+    print("...Google Generative AI initialized.")
 
-# Print status
-print("Enhanced multi-agent system initialized with Supabase integration")
-print(f"Supabase URL: {config.SUPABASE_URL}")
-print(f"AI Model: gemini-2.5-flash-lite")
-print(f"Prompts directory: {prompts_dir}")
+    # Create Supabase Client
+    print("Initializing Supabase client...")
+    supabase: Client = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
+    print("...Supabase client initialized.")
+    
+    # Define prompts directory
+    prompts_dir = os.path.join(current_dir, 'prompts')
 
-# Start the Flask app
-import app
-print("Starting Flask app...")
-app.multi_agent_system = multi_agent_system
-app.supabase = supabase
-app.model = model
+    # Create the Multi-Agent System
+    print("Initializing Multi-Agent System...")
+    multi_agent_system = create_multi_agent_system(supabase, model, prompts_dir=prompts_dir)
+    print("...Multi-Agent System initialized.")
 
-# Run the app
+    # CRITICAL STEP: Inject the initialized objects into the Flask app
+    print("Injecting services into Flask app context...")
+    app.supabase = supabase
+    app.model = model
+    app.multi_agent_system = multi_agent_system
+    print("...Injection complete. Application is ready.")
+
+except Exception as e:
+    print(f"FATAL: Failed to initialize application during startup.")
+    print(f"Error: {e}")
+    # Exit if services can't be loaded
+    sys.exit(1)
+
+# --- 4. Entrypoint for Local Development ---
+# This block will ONLY run when you execute `python run.py` in your terminal.
+# A production server like Vercel will IGNORE this and just use the 'app' object.
 if __name__ == "__main__":
-    from waitress import serve
-    port = 5000
-    print(f"--- Starting production server with Waitress on port {port} ---")
-    serve(app.app, host='0.0.0.0', port=port)
+    port = int(os.environ.get('PORT', 5000))
+    print(f"--- Starting LOCAL production server with Waitress on port {port} ---")
+    serve(app, host='0.0.0.0', port=port)
