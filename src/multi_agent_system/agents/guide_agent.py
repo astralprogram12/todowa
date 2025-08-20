@@ -1,90 +1,15 @@
+# Guide Agent - provides how-to instructions and procedural guidance
+
 from .base_agent import BaseAgent
-import database_personal  # Fix #4: Proper database import
-import os
 
 class GuideAgent(BaseAgent):
     """Agent for providing how-to instructions and procedural guidance."""
     
-    def __init__(self, supabase, ai_model):  # Fix #1: Correct constructor
+    def __init__(self, supabase, ai_model):
         super().__init__(supabase, ai_model, "GuideAgent")
-        self.comprehensive_prompts = {}
     
-    def load_comprehensive_prompts(self):
-        """Load ALL prompts from the prompts/v1/ directory and requirements."""
-        try:
-            prompts_dict = {}
-            
-            # Load all prompts from v1 directory
-            v1_dir = "/workspace/user_input_files/todowa/prompts/v1"
-            if os.path.exists(v1_dir):
-                for file_name in os.listdir(v1_dir):
-                    if file_name.endswith('.md'):
-                        prompt_name = file_name.replace('.md', '')
-                        file_path = os.path.join(v1_dir, file_name)
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            prompts_dict[prompt_name] = f.read()
-            
-            # Load requirements
-            requirements_path = "/workspace/user_input_files/99_requirements.md"
-            if os.path.exists(requirements_path):
-                with open(requirements_path, 'r', encoding='utf-8') as f:
-                    prompts_dict['requirements'] = f.read()
-            
-            # Create comprehensive system prompt for guide assistance
-            self.comprehensive_prompts = {
-                'core_system': self._build_guide_system_prompt(prompts_dict),
-                'ai_interactions': prompts_dict.get('04_ai_interactions', ''),
-                'context_memory': prompts_dict.get('03_context_memory', ''),
-                'templates': prompts_dict.get('08_templates', ''),
-                'decision_tree': prompts_dict.get('09_intelligent_decision_tree', ''),
-                'requirements': prompts_dict.get('requirements', ''),
-                'all_prompts': prompts_dict
-            }
-            
-            return self.comprehensive_prompts
-        except Exception as e:
-            print(f"Error loading comprehensive prompts: {e}")
-            return {}
-    
-    def _build_guide_system_prompt(self, prompts_dict):
-        """Build comprehensive system prompt for guide agent."""
-        core_identity = prompts_dict.get('00_core_identity', '')
-        ai_interactions = prompts_dict.get('04_ai_interactions', '')
-        context_memory = prompts_dict.get('03_context_memory', '')
-        templates = prompts_dict.get('08_templates', '')
-        decision_tree = prompts_dict.get('09_intelligent_decision_tree', '')
-        requirements = prompts_dict.get('requirements', '')
-        
-        return f"""{core_identity}
-
-## GUIDE AGENT SPECIALIZATION
-You are specifically focused on providing help and guidance including:
-- Creating step-by-step instructions and procedural guidance
-- Explaining how-to processes for app features and functionality
-- Providing clear, structured tutorials and walk-throughs
-- Assisting users who are confused about app functionality
-- Offering onboarding guidance for new users
-
-{ai_interactions}
-
-{context_memory}
-
-{templates}
-
-{decision_tree}
-
-## REQUIREMENTS COMPLIANCE
-{requirements}
-
-## GUIDE AGENT BEHAVIOR
-- Apply guide mode interaction patterns for instructional delivery
-- Use structured templates for step-by-step guidance formatting
-- Reference user context and memories for personalized instructions
-- Follow intelligent decision tree for proper classification
-- Provide concrete examples and clear action steps"""
-
     async def process(self, user_input, context, routing_info=None):
-        """Process guide requests with comprehensive prompt system.
+        """Process guide requests and return a response.
         
         Args:
             user_input: The input text from the user
@@ -95,10 +20,6 @@ You are specifically focused on providing help and guidance including:
             A response to the user input
         """
         user_id = context.get('user_id')
-        
-        # Load comprehensive prompts
-        if not self.comprehensive_prompts:
-            self.load_comprehensive_prompts()
         
         # NEW: Apply AI assumptions to enhance processing
         enhanced_context = self._apply_ai_assumptions(context, routing_info)
@@ -112,15 +33,8 @@ You are specifically focused on providing help and guidance including:
             # Determine the topic for the guide
             topic = self._determine_topic(user_input)
         
-        # Generate guide with comprehensive prompts
-        return await self._generate_guide_comprehensive(user_id, user_input, topic, enhanced_context, routing_info)
-    
-    def _apply_ai_assumptions(self, context, routing_info):
-        """Apply AI assumptions to enhance the context"""
-        enhanced_context = context.copy()
-        if routing_info:
-            enhanced_context.update(routing_info.get('assumptions', {}))
-        return enhanced_context
+        # Generate guide based on the topic and user input
+        return await self._generate_guide(user_id, user_input, topic, context)
     
     def _determine_topic(self, user_input):
         """Determine the topic for the guide from the user input."""
@@ -138,73 +52,195 @@ You are specifically focused on providing help and guidance including:
         # If no specific topic is found, use the entire input
         return user_input
     
-    async def _generate_guide_comprehensive(self, user_id, user_input, topic, context, routing_info):
-        """Generate a guide using comprehensive prompt system."""
+    async def _generate_guide(self, user_id, user_input, topic, context):
+        """Generate a guide based on the topic and user input."""
         try:
-            # Build comprehensive prompt using all relevant prompts
-            system_prompt = self.comprehensive_prompts.get('core_system', 'You are a helpful guide agent.')
+            # Use the AI model to generate a guide
+            prompt = f"Create a step-by-step guide for: {topic}\n\nProvide clear, detailed instructions with examples where helpful."
             
-            # Include specific prompt sections for enhanced processing
-            ai_interactions = self.comprehensive_prompts.get('ai_interactions', '')
-            templates = self.comprehensive_prompts.get('templates', '')
-            context_memory = self.comprehensive_prompts.get('context_memory', '')
-            
-            user_prompt = f"""
-Topic: {topic}
-User Question: {user_input}
-Context: {context}
-Routing Info: {routing_info}
-
-USING COMPREHENSIVE PROMPTS:
-1. Apply guide mode interaction patterns for instructional delivery
-2. Use structured templates for step-by-step guidance formatting
-3. Reference user context and memories for personalized instructions
-4. Follow the complete guide assistance guidelines
-5. Provide concrete examples and clear action steps
-
-Create a comprehensive step-by-step guide for: {topic}
-
-Provide clear, detailed instructions following all prompt guidelines:
-- Use structured formatting with headers and bullet points
-- Include concrete examples where helpful
-- Break down complex processes into manageable steps
-- Reference app features and functionality when relevant
-- End with helpful follow-up questions
-"""
-            
-            # Enhanced AI model call with comprehensive prompts
-            full_prompt = f"{system_prompt}\n\nSPECIFIC GUIDANCE:\n{ai_interactions}\n{templates}\n{context_memory}\n\nUSER REQUEST:\n{user_prompt}"
-            
-            response = await self.ai_model.generate_content([
-                full_prompt
-            ])
-            response_text = response.text
+            # In a real implementation, we would use the AI model to generate the guide
+            # For now, let's provide a sample response
+            guide = self._get_sample_guide(topic)
             
             # Log the action
-            if user_id:
-                database_personal.log_action(
-                    supabase=self.supabase,
-                    user_id=user_id,
-                    action_type="generate_guide",
-                    entity_type="guide",
-                    action_details={
-                        "topic": topic,
-                        "guide_length": len(response_text),
-                        "comprehensive_prompts_used": True
-                    },
-                    success_status=True
-                )
+            self._log_action(
+                user_id=user_id,
+                action_type="generate_guide",
+                entity_type="guide",
+                action_details={
+                    "topic": topic,
+                    "query": user_input
+                },
+                success_status=True
+            )
             
             return {
-                "status": "success",
-                "message": response_text,
-                "topic": topic,
-                "actions": [{"agent": self.agent_name, "action": "guide_generated"}]
+                "status": "ok",
+                "message": f"Here's a step-by-step guide for '{topic}':",
+                "guide": guide,
+                "topic": topic
             }
             
         except Exception as e:
+            error_msg = str(e)
+            
+            # Log the error
+            self._log_action(
+                user_id=user_id,
+                action_type="generate_guide",
+                entity_type="guide",
+                action_details={
+                    "topic": topic,
+                    "query": user_input
+                },
+                success_status=False,
+                error_details=error_msg
+            )
+            
             return {
                 "status": "error",
-                "message": f"I'm having trouble creating a guide for that topic. Please try rephrasing your request.",
-                "error": str(e)
+                "message": f"Failed to generate guide: {error_msg}"
             }
+    
+    def _get_sample_guide(self, topic):
+        """Get a sample guide based on common topics."""
+        # Sample guides for common topics
+        topic_lower = topic.lower()
+        
+        if 'reminder' in topic_lower or 'set reminder' in topic_lower:
+            return """**How to Set a Reminder:**
+
+**Step 1: Choose the Task**
+• Decide what task needs a reminder
+• Be specific about what needs to be done
+
+**Step 2: Specify the Time**
+• Choose when you need to be reminded
+• Format examples: "tomorrow at 3pm" or "Monday at 9am"
+
+**Step 3: Set the Reminder**
+• Type: "Remind me to [task] at [time]"
+• Example: "Remind me to call Sarah tomorrow at 2pm"
+
+**Step 4: Confirm Details**
+• Check that the task and time are correct
+• Make adjustments if needed
+
+**Examples:**
+• "Remind me to take medication every day at 9am"
+• "Set a reminder for my dentist appointment on Thursday at 10am"
+• "Remind me to review project notes in 3 hours"""
+        
+        elif 'task' in topic_lower or 'add task' in topic_lower:
+            return """**How to Add a Task:**
+
+**Step 1: Define the Task**
+• Decide what needs to be accomplished
+• Be specific and actionable
+
+**Step 2: Categorize the Task**
+• Choose an appropriate category
+• Use existing categories or create a new one
+
+**Step 3: Set Due Date (Optional)**
+• Decide when the task needs to be completed
+• Format examples: "today", "tomorrow", "next Monday"
+
+**Step 4: Add the Task**
+• Type: "Add task: [task description] in category [category] due [date]"
+• Example: "Add task: prepare quarterly report in category Work due Friday"
+
+**Step 5: Add Details (Optional)**
+• Include additional notes or context
+• Specify priority or time estimates
+
+**Examples:**
+• "Add task: buy groceries in category Shopping"
+• "Create task: finish project presentation due tomorrow at 5pm"
+• "Add task: schedule doctor appointment with notes: annual checkup"""
+        
+        elif 'silent mode' in topic_lower or 'activate silent' in topic_lower:
+            return """**How to Use Silent Mode:**
+
+**Step 1: Decide on Duration**
+• Determine how long you need silent mode
+• Common durations: 30 minutes, 1 hour, 2 hours
+
+**Step 2: Activate Silent Mode**
+• Type: "Go silent for [duration]"
+• Example: "Go silent for 1 hour"
+• Alternatives: "Activate silent mode" or "Turn on silent mode"
+
+**Step 3: Confirm Activation**
+• Check the confirmation message
+• Note the exact end time
+
+**Step 4: Use During Focus Time**
+• Work without interruptions
+• The system will collect messages without notifying you
+
+**Step 5: Exit Silent Mode**
+• Wait for automatic expiration, or
+• Type: "Exit silent mode" to end early
+
+**Examples:**
+• "Go silent for 30 minutes while I'm in a meeting"
+• "Activate silent mode for 2 hours"
+• "Turn on silent mode until 5pm"""
+        
+        elif 'category' in topic_lower or 'categorize' in topic_lower:
+            return """**How to Use Task Categories:**
+
+**Step 1: View Existing Categories**
+• Type: "Show my categories"
+• Review your most-used categories
+
+**Step 2: Create a New Category**
+• When adding a task, specify a new category
+• Example: "Add task: research suppliers in category Vendors"
+
+**Step 3: Assign Tasks to Categories**
+• Always include a category when creating tasks
+• Format: "in category [name]"
+
+**Step 4: Update Task Categories**
+• Type: "Update task [task name] category to [new category]"
+• Example: "Update task quarterly report category to Finance"
+
+**Step 5: Filter Tasks by Category**
+• Type: "Show my Work tasks" or "List tasks in Shopping category"
+• Use for focused review of specific areas
+
+**Examples:**
+• "Add task: schedule meeting in category Work"
+• "Show all tasks in Personal category"
+• "Create new task: gym session in category Health"""
+        
+        else:
+            # Generic guide template for any topic
+            return f"""**How to {topic}:**
+
+**Step 1: Prepare**
+• Gather necessary information and resources
+• Ensure you have everything needed to complete the task
+
+**Step 2: Plan Your Approach**
+• Break down the process into manageable steps
+• Decide on the order of operations
+
+**Step 3: Execute the Main Steps**
+• Follow the process step by step
+• Pay attention to details as you progress
+
+**Step 4: Review and Refine**
+• Check your work for errors or improvements
+• Make adjustments as needed
+
+**Step 5: Complete and Confirm**
+• Finalize the task
+• Verify that everything is working as expected
+
+**Examples:**
+• Example approach for beginners
+• Alternative method for different circumstances
+• Advanced technique for experienced users"""

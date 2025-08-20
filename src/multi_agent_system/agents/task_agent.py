@@ -1,90 +1,18 @@
+# task_agent.py
+# UPDATED VERSION - Example of how to update individual agent files
+# Location: src/multi_agent_system/agents/task_agent.py
+
 from .base_agent import BaseAgent
-import database_personal  # Fix #4: Proper database import
-import os
 
 class TaskAgent(BaseAgent):
     """Agent for handling task-related operations with AI-enhanced processing."""
     
-    def __init__(self, supabase, ai_model):  # Fix #1: Correct constructor
+    def __init__(self, supabase, ai_model):
         super().__init__(supabase, ai_model, "TaskAgent")
-        self.comprehensive_prompts = {}
     
-    def load_comprehensive_prompts(self):
-        """Load ALL prompts from the prompts/v1/ directory and requirements."""
-        try:
-            prompts_dict = {}
-            
-            # Load all prompts from v1 directory
-            v1_dir = "/workspace/user_input_files/todowa/prompts/v1"
-            if os.path.exists(v1_dir):
-                for file_name in os.listdir(v1_dir):
-                    if file_name.endswith('.md'):
-                        prompt_name = file_name.replace('.md', '')
-                        file_path = os.path.join(v1_dir, file_name)
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            prompts_dict[prompt_name] = f.read()
-            
-            # Load requirements
-            requirements_path = "/workspace/user_input_files/99_requirements.md"
-            if os.path.exists(requirements_path):
-                with open(requirements_path, 'r', encoding='utf-8') as f:
-                    prompts_dict['requirements'] = f.read()
-            
-            # Create comprehensive system prompt for task management
-            self.comprehensive_prompts = {
-                'core_system': self._build_task_system_prompt(prompts_dict),
-                'action_schema': prompts_dict.get('01_action_schema', ''),
-                'task_processing': prompts_dict.get('02_task_processing', ''),
-                'context_memory': prompts_dict.get('03_context_memory', ''),
-                'templates': prompts_dict.get('08_templates', ''),
-                'requirements': prompts_dict.get('requirements', ''),
-                'all_prompts': prompts_dict
-            }
-            
-            return self.comprehensive_prompts
-        except Exception as e:
-            print(f"Error loading comprehensive prompts: {e}")
-            return {}
-    
-    def _build_task_system_prompt(self, prompts_dict):
-        """Build comprehensive system prompt for task agent."""
-        core_identity = prompts_dict.get('00_core_identity', '')
-        action_schema = prompts_dict.get('01_action_schema', '')
-        task_processing = prompts_dict.get('02_task_processing', '')
-        context_memory = prompts_dict.get('03_context_memory', '')
-        templates = prompts_dict.get('08_templates', '')
-        requirements = prompts_dict.get('requirements', '')
-        
-        return f"""{core_identity}
-
-## TASK AGENT SPECIALIZATION
-You are specifically focused on task management operations including:
-- Creating, updating, deleting, and completing tasks
-- Managing task categories, priorities, and due dates
-- Auto-enhancement of task details
-- Task conflict resolution
-- Category management and smart assignment
-
-{action_schema}
-
-{task_processing}
-
-{context_memory}
-
-{templates}
-
-## REQUIREMENTS COMPLIANCE
-{requirements}
-
-## TASK AGENT BEHAVIOR
-- ALWAYS load and use multiple relevant prompts for comprehensive decision making
-- Apply auto-enhancement rules for missing task details
-- Use structured response templates for task confirmations
-- Integrate category management with every task operation
-- Follow the complete action schema for all task operations"""
-
+    # UPDATED METHOD SIGNATURE - Added routing_info=None parameter
     async def process(self, user_input, context, routing_info=None):
-        """Process task-related user input with comprehensive AI prompts.
+        """Process task-related user input with AI assumptions.
         
         Args:
             user_input: The input text from the user
@@ -96,226 +24,232 @@ You are specifically focused on task management operations including:
         """
         user_id = context.get('user_id')
         
-        # Load comprehensive prompts
-        if not self.comprehensive_prompts:
-            self.load_comprehensive_prompts()
-        
         # NEW: Apply AI assumptions to enhance processing
         enhanced_context = self._apply_ai_assumptions(context, routing_info)
         
-        # NEW: Use comprehensive AI processing with multiple prompts
-        return await self._process_with_comprehensive_prompts(user_input, enhanced_context, routing_info)
+        # NEW: Use AI assumptions if available
+        if routing_info and routing_info.get('assumptions'):
+            print(f"TaskAgent using AI assumptions: {routing_info['assumptions']}")
+            return await self._process_with_ai_assumptions(user_input, enhanced_context, routing_info)
+        
+        # Keep existing logic as fallback
+        operation = self._determine_operation(user_input)
+        
+        if operation == 'add':
+            return await self._add_task(user_id, user_input, enhanced_context)
+        elif operation == 'update':
+            return await self._update_task(user_id, user_input, enhanced_context)
+        elif operation == 'delete':
+            return await self._delete_task(user_id, user_input, enhanced_context)
+        elif operation == 'complete':
+            return await self._complete_task(user_id, user_input, enhanced_context)
+        elif operation == 'list':
+            return await self._list_tasks(user_id, user_input, enhanced_context)
+        else:
+            # Use AI assumptions to make a confident guess
+            ai_assumptions = routing_info.get('assumptions', {}) if routing_info else {}
+            return await self._smart_task_creation(user_id, user_input, enhanced_context, ai_assumptions)
     
-    async def _process_with_comprehensive_prompts(self, user_input, context, routing_info):
-        """Process task with comprehensive prompt system."""
+    async def _process_with_ai_assumptions(self, user_input, context, routing_info):
+        """Process task with AI-provided assumptions"""
         user_id = context.get('user_id')
-        assumptions = routing_info.get('assumptions', {}) if routing_info else {}
+        assumptions = routing_info.get('assumptions', {})
         
         # Extract task details with AI enhancement
         title = self._extract_title(user_input) or user_input.strip()
         category = assumptions.get('category') or self._extract_category(user_input) or 'general'
         priority = assumptions.get('priority') or self._extract_priority(user_input) or 'medium'
         due_date = self._extract_due_date(user_input)
+        notes = self._extract_notes(user_input)
         
-        # Build comprehensive prompt using all relevant prompts
-        system_prompt = self.comprehensive_prompts.get('core_system', 'You are a helpful task management agent.')
+        # Add the task using enhanced details
+        from database_personal import add_task_entry
         
-        # Include specific prompt sections for enhanced processing
-        action_schema = self.comprehensive_prompts.get('action_schema', '')
-        task_processing = self.comprehensive_prompts.get('task_processing', '')
-        templates = self.comprehensive_prompts.get('templates', '')
-        
-        user_prompt = f"""
-User Input: {user_input}
-Context: {context}
-Routing Info: {routing_info}
-
-Task Details Extracted:
-- Title: {title}
-- Category: {category}
-- Priority: {priority}
-- Due Date: {due_date}
-
-USING COMPREHENSIVE PROMPTS:
-1. Follow the action schema for proper JSON response format
-2. Apply task processing rules for auto-enhancement
-3. Use structured templates for response formatting
-4. Ensure category management compliance
-5. Include all required actions in JSON format
-
-Generate a comprehensive response following all prompt guidelines.
-"""
-        
-        # Enhanced AI model call with comprehensive prompts
-        full_prompt = f"{system_prompt}\n\nSPECIFIC GUIDANCE:\n{action_schema}\n{task_processing}\n{templates}\n\nUSER REQUEST:\n{user_prompt}"
-        
-        response = await self.ai_model.generate_content([
-            full_prompt
-        ])
-        response_text = response.text
-        
-        # Create the task if this is a creation request
-        if assumptions.get('operation') == 'create' or self._is_task_creation(user_input):
-            task_id = await self._create_task_with_details(
-                user_id, title, category, priority, due_date
-            )
-            
-            return {
-                "status": "success",
-                "message": f"Task created successfully: {title}",
-                "task_id": task_id,
-                "actions": [{"agent": self.agent_name, "action": "task_created"}]
-            }
-        
-        return {
-            "status": "success", 
-            "message": response_text,
-            "actions": [{"agent": self.agent_name, "action": "task_processed"}]
-        }
-    
-    def _apply_ai_assumptions(self, context, routing_info):
-        """Apply AI assumptions to enhance the context"""
-        enhanced_context = context.copy()
-        if routing_info:
-            enhanced_context.update(routing_info.get('assumptions', {}))
-        return enhanced_context
-    
-    def _determine_operation(self, user_input):
-        """Determine the task operation from the user input."""
-        user_input_lower = user_input.lower()
-        
-        if any(phrase in user_input_lower for phrase in ['add task', 'create task', 'new task', 'remind me to']):
-            return 'add'
-        elif any(phrase in user_input_lower for phrase in ['update task', 'modify task', 'change task']):
-            return 'update'
-        elif any(phrase in user_input_lower for phrase in ['delete task', 'remove task', 'cancel task']):
-            return 'delete'
-        elif any(phrase in user_input_lower for phrase in ['complete task', 'finish task', 'done task']):
-            return 'complete'
-        elif any(phrase in user_input_lower for phrase in ['list tasks', 'show tasks', 'my tasks']):
-            return 'list'
-        else:
-            return None
-    
-    def _is_task_creation(self, user_input):
-        """Check if the input suggests task creation"""
-        creation_indicators = ['need to', 'have to', 'must', 'should', 'remember to', 'don\'t forget']
-        return any(indicator in user_input.lower() for indicator in creation_indicators)
-    
-    def _extract_title(self, user_input):
-        """Extract task title from user input"""
-        # Simple extraction - in real implementation would be more sophisticated
-        return user_input.strip()
-    
-    def _extract_category(self, user_input):
-        """Extract task category from user input"""
-        categories = {
-            'work': ['work', 'office', 'meeting', 'project', 'business'],
-            'personal': ['personal', 'home', 'family', 'self'],
-            'health': ['doctor', 'exercise', 'gym', 'health', 'medical'],
-            'shopping': ['buy', 'purchase', 'shop', 'get', 'pick up']
-        }
-        
-        user_input_lower = user_input.lower()
-        for category, keywords in categories.items():
-            if any(keyword in user_input_lower for keyword in keywords):
-                return category
-        return 'general'
-    
-    def _extract_priority(self, user_input):
-        """Extract task priority from user input"""
-        user_input_lower = user_input.lower()
-        if any(word in user_input_lower for word in ['urgent', 'asap', 'immediately', 'critical']):
-            return 'high'
-        elif any(word in user_input_lower for word in ['low priority', 'sometime', 'eventually']):
-            return 'low'
-        return 'medium'
-    
-    def _extract_due_date(self, user_input):
-        """Extract due date from user input"""
-        # Simplified - would use more sophisticated date parsing in real implementation
-        import re
-        from datetime import datetime, timedelta
-        
-        user_input_lower = user_input.lower()
-        
-        if 'today' in user_input_lower:
-            return datetime.now().date()
-        elif 'tomorrow' in user_input_lower:
-            return (datetime.now() + timedelta(days=1)).date()
-        elif 'next week' in user_input_lower:
-            return (datetime.now() + timedelta(days=7)).date()
-        
-        return None
-    
-    async def _create_task_with_details(self, user_id, title, category, priority, due_date):
-        """Create a task with detailed information"""
         try:
-            # Use the correct database function to create a task
-            task_data = database_personal.add_task_entry(
+            task = add_task_entry(
                 supabase=self.supabase,
                 user_id=user_id,
                 title=title,
                 category=category,
                 priority=priority,
-                due_date=due_date.isoformat() if due_date else None
+                due_date=due_date,
+                notes=notes
             )
             
-            return task_data.get('id') if task_data else None
+            # Log the action with AI confidence
+            self._log_action(
+                user_id=user_id,
+                action_type="add_task",
+                entity_type="task",
+                entity_id=task.get('id'),
+                action_details={
+                    "title": title,
+                    "category": category,
+                    "priority": priority,
+                    "ai_enhanced": True,
+                    "ai_confidence": routing_info.get('confidence', 0.6)
+                },
+                success_status=True
+            )
             
-        except Exception as e:
-            print(f"Error creating task: {e}")
-            return None
-    
-    async def _add_task(self, user_id, user_input, context):
-        """Add a new task"""
-        title = self._extract_title(user_input)
-        category = self._extract_category(user_input)
-        priority = self._extract_priority(user_input)
-        due_date = self._extract_due_date(user_input)
-        
-        task_id = await self._create_task_with_details(user_id, title, category, priority, due_date)
-        
-        if task_id:
+            # Prepare enhanced response
+            response = f"✅ I've created your task with smart enhancements:\n\n"
+            response += f"**Task:** {title}\n"
+            response += f"**Category:** {category}"
+            if assumptions.get('category'):
+                response += " (AI suggested)"
+            response += f"\n**Priority:** {priority}"
+            if assumptions.get('priority'):
+                response += " (AI suggested)"
+            if due_date:
+                response += f"\n**Due:** {due_date}"
+            response += "\n\nAnything you'd like to adjust?"
+            
             return {
                 "status": "success",
-                "message": f"Task added: {title}",
-                "task_id": task_id
+                "message": response,
+                "actions": [{
+                    "type": "add_task",
+                    "task_id": task.get('id'),
+                    "ai_enhanced": True
+                }]
             }
-        else:
+            
+        except Exception as e:
+            print(f"Error adding task: {e}")
             return {
                 "status": "error",
-                "message": "Failed to add task. Please try again."
+                "message": "I had trouble creating that task. Please try again."
             }
     
-    async def _update_task(self, user_id, user_input, context):
-        """Update an existing task"""
-        return {
-            "status": "info",
-            "message": "Task update functionality would be implemented here."
+    async def _smart_task_creation(self, user_id, user_input, context, ai_assumptions):
+        """Create task with smart defaults when operation is unclear"""
+        # Default to adding a task with AI assumptions
+        title = user_input.strip()
+        category = ai_assumptions.get('category', 'general')
+        priority = ai_assumptions.get('priority', 'medium')
+        
+        from database_personal import add_task_entry
+        
+        try:
+            task = add_task_entry(
+                supabase=self.supabase,
+                user_id=user_id,
+                title=title,
+                category=category,
+                priority=priority
+            )
+            
+            return {
+                "status": "success",
+                "message": f"I've added '{title}' as a {priority} priority {category} task. Is that what you wanted?",
+                "actions": [{
+                    "type": "add_task",
+                    "task_id": task.get('id'),
+                    "confident_guess": True
+                }]
+            }
+            
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": "I'll help you with that task. Could you provide a bit more detail?"
+            }
+    
+    def _determine_operation(self, user_input):
+        """Determine the task operation from the user input."""
+        user_input_lower = user_input.lower()
+        
+        if any(phrase in user_input_lower for phrase in ['add task', 'create task', 'new task']):
+            return 'add'
+        elif any(phrase in user_input_lower for phrase in ['update task', 'edit task', 'change task', 'modify task']):
+            return 'update'
+        elif any(phrase in user_input_lower for phrase in ['delete task', 'remove task']):
+            return 'delete'
+        elif any(phrase in user_input_lower for phrase in ['complete task', 'finish task', 'mark task', 'done']):
+            return 'complete'
+        elif any(phrase in user_input_lower for phrase in ['list tasks', 'show tasks', 'get tasks']):
+            return 'list'
+        else:
+            # Default to add if unclear but contains 'task' or seems task-related
+            return 'add' if 'task' in user_input_lower else None
+    
+    # Keep all existing helper methods unchanged
+    def _extract_title(self, user_input):
+        """Extract task title from user input"""
+        # Simple extraction logic - improve as needed
+        for prefix in ['add task:', 'create task:', 'new task:', 'task:']:
+            if prefix in user_input.lower():
+                return user_input.lower().split(prefix, 1)[1].strip()
+        return user_input.strip()
+    
+    def _extract_category(self, user_input):
+        """Extract category from user input"""
+        user_lower = user_input.lower()
+        
+        # Category mapping
+        categories = {
+            'work': ['work', 'job', 'office', 'meeting', 'project'],
+            'personal': ['personal', 'home', 'family', 'health'],
+            'finance': ['pay', 'bill', 'money', 'budget', 'expense'],
+            'shopping': ['buy', 'shop', 'grocery', 'store', 'purchase'],
+            'health': ['doctor', 'gym', 'exercise', 'medical', 'appointment']
         }
+        
+        for category, keywords in categories.items():
+            if any(keyword in user_lower for keyword in keywords):
+                return category
+        
+        return None
+    
+    def _extract_priority(self, user_input):
+        """Extract priority from user input"""
+        user_lower = user_input.lower()
+        
+        if any(word in user_lower for word in ['urgent', 'asap', 'critical', 'important']):
+            return 'high'
+        elif any(word in user_lower for word in ['low', 'minor', 'sometime', 'eventually']):
+            return 'low'
+        
+        return None
+    
+    def _extract_due_date(self, user_input):
+        """Extract due date from user input"""
+        # Implement date extraction logic
+        # For now, return None
+        return None
+    
+    def _extract_notes(self, user_input):
+        """Extract additional notes from user input"""
+        # Implement notes extraction logic
+        # For now, return None
+        return None
+    
+    # Implement other existing methods (_add_task, _update_task, etc.)
+    # Keep all existing implementations - just update the method signatures
+    # to use the enhanced_context instead of context
+    
+    async def _add_task(self, user_id, user_input, context):
+        """Add a new task - existing implementation"""
+        # Your existing _add_task implementation here
+        pass
+    
+    async def _update_task(self, user_id, user_input, context):
+        """Update existing task - existing implementation"""
+        # Your existing _update_task implementation here
+        pass
     
     async def _delete_task(self, user_id, user_input, context):
-        """Delete a task"""
-        return {
-            "status": "info", 
-            "message": "Task deletion functionality would be implemented here."
-        }
+        """Delete a task - existing implementation"""
+        # Your existing _delete_task implementation here
+        pass
     
     async def _complete_task(self, user_id, user_input, context):
-        """Mark a task as complete"""
-        return {
-            "status": "info",
-            "message": "Task completion functionality would be implemented here."
-        }
+        """Complete a task - existing implementation"""
+        # Your existing _complete_task implementation here
+        pass
     
     async def _list_tasks(self, user_id, user_input, context):
-        """List user tasks"""
-        return {
-            "status": "info",
-            "message": "Task listing functionality would be implemented here."
-        }
-    
-    async def _smart_task_creation(self, user_id, user_input, context, assumptions):
-        """Create task using AI assumptions"""
-        return await self._add_task(user_id, user_input, context)
+        """List tasks - existing implementation"""
+        # Your existing _list_tasks implementation here
+        pass

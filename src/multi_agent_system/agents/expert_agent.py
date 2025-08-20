@@ -1,90 +1,15 @@
+# Expert Agent - provides domain-specific advice and strategies
+
 from .base_agent import BaseAgent
-import database_personal  # Fix #4: Proper database import
-import os
 
 class ExpertAgent(BaseAgent):
     """Agent for providing domain-specific advice and strategies."""
     
-    def __init__(self, supabase, ai_model):  # Fix #1: Correct constructor
+    def __init__(self, supabase, ai_model):
         super().__init__(supabase, ai_model, "ExpertAgent")
-        self.comprehensive_prompts = {}
     
-    def load_comprehensive_prompts(self):
-        """Load ALL prompts from the prompts/v1/ directory and requirements."""
-        try:
-            prompts_dict = {}
-            
-            # Load all prompts from v1 directory
-            v1_dir = "/workspace/user_input_files/todowa/prompts/v1"
-            if os.path.exists(v1_dir):
-                for file_name in os.listdir(v1_dir):
-                    if file_name.endswith('.md'):
-                        prompt_name = file_name.replace('.md', '')
-                        file_path = os.path.join(v1_dir, file_name)
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            prompts_dict[prompt_name] = f.read()
-            
-            # Load requirements
-            requirements_path = "/workspace/user_input_files/99_requirements.md"
-            if os.path.exists(requirements_path):
-                with open(requirements_path, 'r', encoding='utf-8') as f:
-                    prompts_dict['requirements'] = f.read()
-            
-            # Create comprehensive system prompt for expert advice
-            self.comprehensive_prompts = {
-                'core_system': self._build_expert_system_prompt(prompts_dict),
-                'ai_interactions': prompts_dict.get('04_ai_interactions', ''),
-                'context_memory': prompts_dict.get('03_context_memory', ''),
-                'templates': prompts_dict.get('08_templates', ''),
-                'decision_tree': prompts_dict.get('09_intelligent_decision_tree', ''),
-                'requirements': prompts_dict.get('requirements', ''),
-                'all_prompts': prompts_dict
-            }
-            
-            return self.comprehensive_prompts
-        except Exception as e:
-            print(f"Error loading comprehensive prompts: {e}")
-            return {}
-    
-    def _build_expert_system_prompt(self, prompts_dict):
-        """Build comprehensive system prompt for expert agent."""
-        core_identity = prompts_dict.get('00_core_identity', '')
-        ai_interactions = prompts_dict.get('04_ai_interactions', '')
-        context_memory = prompts_dict.get('03_context_memory', '')
-        templates = prompts_dict.get('08_templates', '')
-        decision_tree = prompts_dict.get('09_intelligent_decision_tree', '')
-        requirements = prompts_dict.get('requirements', '')
-        
-        return f"""{core_identity}
-
-## EXPERT AGENT SPECIALIZATION
-You are specifically focused on providing expert advice and strategic guidance including:
-- Domain-specific expertise across multiple fields
-- Strategic advice for productivity, career, technology, finance, health, education, relationships
-- Best practices and actionable recommendations
-- Problem-solving strategies and frameworks
-- Resource recommendations and learning paths
-
-{ai_interactions}
-
-{context_memory}
-
-{templates}
-
-{decision_tree}
-
-## REQUIREMENTS COMPLIANCE
-{requirements}
-
-## EXPERT AGENT BEHAVIOR
-- Apply expert mode interaction patterns for advice delivery
-- Use structured templates for expert response formatting
-- Reference user context and memories for personalized advice
-- Provide comprehensive, actionable guidance with clear next steps
-- Include multiple approaches and frameworks when appropriate"""
-
     async def process(self, user_input, context, routing_info=None):
-        """Process expert advice requests with comprehensive prompt system.
+        """Process expert advice requests and return a response.
         
         Args:
             user_input: The input text from the user
@@ -95,10 +20,6 @@ You are specifically focused on providing expert advice and strategic guidance i
             A response to the user input
         """
         user_id = context.get('user_id')
-        
-        # Load comprehensive prompts
-        if not self.comprehensive_prompts:
-            self.load_comprehensive_prompts()
         
         # NEW: Apply AI assumptions to enhance processing
         enhanced_context = self._apply_ai_assumptions(context, routing_info)
@@ -112,15 +33,8 @@ You are specifically focused on providing expert advice and strategic guidance i
             # Determine the domain for the expert advice
             domain = self._determine_domain(user_input)
         
-        # Generate expert advice with comprehensive prompts
-        return await self._generate_expert_advice_comprehensive(user_id, user_input, domain, enhanced_context, routing_info)
-    
-    def _apply_ai_assumptions(self, context, routing_info):
-        """Apply AI assumptions to enhance the context"""
-        enhanced_context = context.copy()
-        if routing_info:
-            enhanced_context.update(routing_info.get('assumptions', {}))
-        return enhanced_context
+        # Generate expert advice based on the domain and user input
+        return await self._generate_expert_advice(user_id, user_input, domain, context)
     
     def _determine_domain(self, user_input):
         """Determine the domain for expert advice from the user input."""
@@ -145,74 +59,163 @@ You are specifically focused on providing expert advice and strategic guidance i
         # Default to productivity if no specific domain is detected
         return 'productivity'
     
-    async def _generate_expert_advice_comprehensive(self, user_id, user_input, domain, context, routing_info):
-        """Generate expert advice using comprehensive prompt system."""
+    async def _generate_expert_advice(self, user_id, user_input, domain, context):
+        """Generate expert advice based on the domain and user input."""
         try:
-            # Build comprehensive prompt using all relevant prompts
-            system_prompt = self.comprehensive_prompts.get('core_system', 'You are an expert advisor.')
+            # Use the AI model to generate expert advice
+            prompt = f"Act as an expert in {domain}. Provide professional advice for: {user_input}\n\nGive structured, actionable advice with clear steps and examples."
             
-            # Include specific prompt sections for enhanced processing
-            ai_interactions = self.comprehensive_prompts.get('ai_interactions', '')
-            templates = self.comprehensive_prompts.get('templates', '')
-            context_memory = self.comprehensive_prompts.get('context_memory', '')
+            # In a real implementation, we would use the AI model to generate the advice
+            # For now, let's provide a sample response
+            advice = self._get_sample_advice(domain)
             
-            user_prompt = f"""
-Domain: {domain.title()}
-User Question: {user_input}
-Context: {context}
-Routing Info: {routing_info}
-
-USING COMPREHENSIVE PROMPTS:
-1. Apply expert mode interaction patterns for advice delivery
-2. Use structured templates for professional expert response formatting
-3. Reference user context and memories for personalized advice
-4. Follow the complete expert advice guidelines
-5. Provide strategic, actionable recommendations with clear frameworks
-
-As an expert in {domain}, provide detailed, actionable advice following all prompt guidelines.
-Include:
-- Specific strategies or solutions
-- Best practices in this domain  
-- Practical steps the user can take
-- Potential challenges and how to overcome them
-- Resources for further learning
-
-Make your advice practical and tailored to the user's situation.
-"""
-            
-            # Enhanced AI model call with comprehensive prompts
-            full_prompt = f"{system_prompt}\n\nSPECIFIC GUIDANCE:\n{ai_interactions}\n{templates}\n{context_memory}\n\nUSER REQUEST:\n{user_prompt}"
-            
-            response = await self.ai_model.generate_content([
-                full_prompt
-            ])
-            response_text = response.text
-            
-            # Log the expert advice request
-            if user_id:
-                database_personal.log_action(
-                    supabase=self.supabase,
-                    user_id=user_id,
-                    action_type="expert_advice",
-                    entity_type="advice",
-                    action_details={
-                        "domain": domain,
-                        "question_length": len(user_input),
-                        "comprehensive_prompts_used": True
-                    },
-                    success_status=True
-                )
+            # Log the action
+            self._log_action(
+                user_id=user_id,
+                action_type="generate_expert_advice",
+                entity_type="expert_advice",
+                action_details={
+                    "domain": domain,
+                    "query": user_input
+                },
+                success_status=True
+            )
             
             return {
-                "status": "success",
-                "message": response_text,
-                "domain": domain,
-                "actions": [{"agent": self.agent_name, "action": "expert_advice_provided"}]
+                "status": "ok",
+                "message": f"Here's my expert advice on {domain}:",
+                "advice": advice,
+                "domain": domain
             }
             
         except Exception as e:
+            error_msg = str(e)
+            
+            # Log the error
+            self._log_action(
+                user_id=user_id,
+                action_type="generate_expert_advice",
+                entity_type="expert_advice",
+                action_details={
+                    "domain": domain,
+                    "query": user_input
+                },
+                success_status=False,
+                error_details=error_msg
+            )
+            
             return {
                 "status": "error",
-                "message": f"I'm having trouble providing expert advice right now. Please try rephrasing your question.",
-                "error": str(e)
+                "message": f"Failed to generate expert advice: {error_msg}"
             }
+    
+    def _get_sample_advice(self, domain):
+        """Get sample advice for the specified domain."""
+        sample_advice = {
+            'productivity': """**Productivity Strategy:**
+
+**Key Principles:**
+• Focus on high-impact tasks first
+• Minimize context-switching
+• Use time-blocking for deep work
+
+**Implementation Steps:**
+1. Identify your 1-3 most important tasks each morning
+2. Block 90-minute distraction-free sessions for deep work
+3. Take deliberate breaks using the Pomodoro technique
+
+**Example Workflow:**
+Start your day by completing one high-impact task before checking email or messages. This builds momentum and ensures progress on what matters most.""",
+            
+            'career': """**Career Development Strategy:**
+
+**Key Principles:**
+• Focus on developing transferable skills
+• Build your professional network consistently
+• Document your achievements for visibility
+
+**Implementation Steps:**
+1. Identify skill gaps based on target roles
+2. Schedule monthly coffee chats with industry professionals
+3. Create a system to track and showcase your accomplishments
+
+**Example Approach:**
+Set up a "professional development hour" every week specifically dedicated to learning a high-value skill in your field.""",
+            
+            'technology': """**Technology Integration Strategy:**
+
+**Key Principles:**
+• Start with problems, not technologies
+• Prioritize systems that reduce friction
+• Build for flexibility and future expansion
+
+**Implementation Steps:**
+1. Audit your current workflow to identify pain points
+2. Research solutions that integrate with existing tools
+3. Test with small experiments before full implementation
+
+**Example Setup:**
+Implement an automation tool like Zapier to connect your most-used applications, saving manual data transfer time.""",
+            
+            'finance': """**Financial Planning Strategy:**
+
+**Key Principles:**
+• Automate essential savings and investments
+• Focus on big-win decisions over micro-frugality
+• Align spending with your personal values
+
+**Implementation Steps:**
+1. Set up automatic transfers to savings on payday
+2. Review and negotiate major recurring expenses
+3. Create separate accounts for different financial goals
+
+**Example Approach:**
+Use the 50/30/20 budget: 50% on essentials, 30% on discretionary spending, and 20% on financial goals.""",
+            
+            'health': """**Holistic Health Strategy:**
+
+**Key Principles:**
+• Focus on sustainable habits over quick results
+• Address sleep quality as your foundation
+• Integrate movement throughout your day
+
+**Implementation Steps:**
+1. Establish a consistent sleep and wake schedule
+2. Incorporate 5-10 minute movement breaks every hour
+3. Prepare nutrient-dense meals in batch cooking sessions
+
+**Example Routine:**
+Start with a 10-minute morning routine combining light stretching, brief meditation, and a glass of water before checking your phone.""",
+            
+            'education': """**Effective Learning Strategy:**
+
+**Key Principles:**
+• Use active recall instead of passive review
+• Space your practice for long-term retention
+• Connect new concepts to existing knowledge
+
+**Implementation Steps:**
+1. Convert notes into question-answer formats
+2. Schedule spaced review sessions (1 day, 3 days, 7 days)
+3. Teach concepts to others to identify knowledge gaps
+
+**Example Technique:**
+Use the Feynman Technique: explain a concept in simple language as if teaching a beginner to identify areas you don't fully understand.""",
+            
+            'relationships': """**Relationship Building Strategy:**
+
+**Key Principles:**
+• Practice active listening without interruption
+• Express appreciation specifically and regularly
+• Address issues directly without blame language
+
+**Implementation Steps:**
+1. Schedule dedicated quality time without distractions
+2. Use "I" statements when discussing concerns
+3. Establish regular check-ins for open communication
+
+**Example Approach:**
+When conflicts arise, use the format: "When [situation occurs], I feel [emotion] because [reason]. What I need is [request]."""
+        }
+        
+        return sample_advice.get(domain, sample_advice['productivity'])
