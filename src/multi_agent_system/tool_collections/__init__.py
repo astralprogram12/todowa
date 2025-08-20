@@ -21,6 +21,7 @@ def register_tools():
     """Register additional tools from external modules."""
     try:
         # Import your new, primary toolset
+        # Make sure this filename matches your actual tools file (e.g., 'enhanced_ai_tools')
         import enhanced_ai_tools
         
         # Register AI tools with the unified tool registry
@@ -34,7 +35,7 @@ def register_tools():
                 tool_registry.register_tool(
                     name=attr_name,
                     func=obj,
-                    category='ai_tools', # Or another category if you prefer
+                    category='ai_tools',
                     description=getattr(obj, '__doc__', f"AI tool: {attr_name}")
                 )
 
