@@ -176,17 +176,25 @@ Generate an appropriate response and reminder creation plan.
         ])
         response_text = response.text
         
-        # Create the reminder
-        reminder_id = await self._create_reminder_with_details(
+        # Create the reminder (and auto-create task if needed)
+        reminder_result = await self._create_reminder_with_details(
             user_id, reminder_text, reminder_time, reminder_type
         )
         
-        if reminder_id:
+        if reminder_result and reminder_result.get('id'):
+            message = f"Reminder set: {reminder_text}"
+            
+            # Add task creation info if a task was auto-created
+            if reminder_result.get('task_auto_created'):
+                task_info = reminder_result.get('auto_created_task', {})
+                message += f"\n✅ I also created a task '{task_info.get('title')}' to help you track this."
+            
             return {
                 "status": "success",
-                "message": f"Reminder set: {reminder_text}",
-                "reminder_id": reminder_id,
+                "message": message,
+                "reminder_id": reminder_result.get('id'),
                 "reminder_time": reminder_time,
+                "task_auto_created": reminder_result.get('task_auto_created', False),
                 "actions": [{"agent": self.agent_name, "action": "reminder_created"}]
             }
         else:
@@ -209,16 +217,25 @@ Generate an appropriate response and reminder creation plan.
                     "message": "I couldn't determine what to remind you about. Please be more specific."
                 }
             
-            reminder_id = await self._create_reminder_with_details(
+            # Create reminder (and auto-create task if needed)
+            reminder_result = await self._create_reminder_with_details(
                 user_id, reminder_text, reminder_time, reminder_type
             )
             
-            if reminder_id:
+            if reminder_result and reminder_result.get('id'):
                 time_info = f" at {reminder_time}" if reminder_time else ""
+                message = f"Reminder set{time_info}: {reminder_text}"
+                
+                # Add task creation info if a task was auto-created
+                if reminder_result.get('task_auto_created'):
+                    task_info = reminder_result.get('auto_created_task', {})
+                    message += f"\n✅ I also created a task '{task_info.get('title')}' to help you track this."
+                
                 return {
                     "status": "success",
-                    "message": f"Reminder set{time_info}: {reminder_text}",
-                    "reminder_id": reminder_id
+                    "message": message,
+                    "reminder_id": reminder_result.get('id'),
+                    "task_auto_created": reminder_result.get('task_auto_created', False)
                 }
             else:
                 return {
@@ -364,3 +381,203 @@ Generate an appropriate response and reminder creation plan.
             # "in 30 minutes", "in 2 hours", etc.
             time_match = re.search(r'in (\d+) (minute|hour|day)s?', user_input_lower)
             if time_match:
+                amount = int(time_match.group(1))
+                unit = time_match.group(2)
+                
+                now = datetime.now()
+                if unit.startswith('minute'):
+                    reminder_time = now + timedelta(minutes=amount)
+                elif unit.startswith('hour'):
+                    reminder_time = now + timedelta(hours=amount)
+                elif unit.startswith('day'):
+                    reminder_time = now + timedelta(days=amount)
+                else:
+                    return None
+                
+                return reminder_time.isoformat()
+        
+        # Handle specific times like "at 3pm", "at 15:00"
+        time_patterns = [
+            r'at (\d{1,2}):(\d{2})\s*(am|pm)?',
+            r'at (\d{1,2})\s*(am|pm)',
+            r'(\d{1,2}):(\d{2})\s*(am|pm)?',
+            r'(\d{1,2})\s*(am|pm)'
+        ]
+        
+        for pattern in time_patterns:
+            match = re.search(pattern, user_input_lower)
+            if match:
+                try:
+                    hour = int(match.group(1))
+                    minute = int(match.group(2)) if len(match.groups()) > 1 and match.group(2) else 0
+                    am_pm = match.group(3) if len(match.groups()) > 2 else None
+                    
+                    # Convert to 24-hour format
+                    if am_pm:
+                        if am_pm.lower() == 'pm' and hour != 12:
+                            hour += 12
+                        elif am_pm.lower() == 'am' and hour == 12:
+                            hour = 0
+                    
+                    # Create datetime for today at specified time
+                    now = datetime.now()
+                    reminder_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                    
+                    # If the time has already passed today, schedule for tomorrow
+                    if reminder_time <= now:
+                        reminder_time += timedelta(days=1)
+                    
+                    return reminder_time.isoformat()
+                except (ValueError, IndexError):
+                    continue
+        
+        # Handle "tomorrow", "today", specific dates
+        date_patterns = [
+            (r'tomorrow', 1),
+            (r'today', 0),
+            (r'next week', 7)
+        ]
+        
+        for pattern, days_offset in date_patterns:
+            if pattern in user_input_lower:
+                reminder_time = datetime.now() + timedelta(days=days_offset)
+                return reminder_time.isoformat()
+        
+        return None
+    
+    def _determine_reminder_type(self, user_input):
+        """Determine the type of reminder based on user input"""
+        user_input_lower = user_input.lower()
+        
+        # Location-based reminders
+        location_keywords = ['when I get to', 'when I arrive at', 'at location', 'when I reach']
+        if any(keyword in user_input_lower for keyword in location_keywords):
+            return 'location_based'
+        
+        # Time-based reminders (default)
+        return 'time_based'
+    
+    async def _ensure_task_exists_for_reminder(self, user_id, reminder_text, reminder_time):
+        """Ensure a task exists for the reminder. Create one if it doesn't exist.
+        
+        Based on requirements: Handle reminder-task relationships (create task if none exists)
+        """
+        try:
+            # Check if there's already a task with similar content
+            existing_tasks = database_personal.get_user_tasks(
+                supabase=self.supabase,
+                user_id=user_id
+            )
+            
+            # Look for similar task
+            task_exists = False
+            if existing_tasks:
+                for task in existing_tasks:
+                    task_title = task.get('title', '').lower()
+                    if reminder_text.lower() in task_title or task_title in reminder_text.lower():
+                        task_exists = True
+                        break
+            
+            # Create task if none exists
+            if not task_exists:
+                task_data = {
+                    'title': reminder_text,
+                    'category': 'Reminders',  # Auto-assigned category
+                    'priority': 'medium',
+                    'notes': f'Task created automatically from reminder',
+                    'dueDate': reminder_time,  # Set due date to reminder time
+                    'tags': ['auto-created', 'reminder'],
+                    'difficulty': 'easy',
+                    'estimateMinutes': 15  # Default estimate
+                }
+                
+                # Create the task
+                task_result = database_personal.add_task_entry(
+                    supabase=self.supabase,
+                    user_id=user_id,
+                    title=task_data['title'],
+                    category=task_data['category'],
+                    notes=task_data['notes'],
+                    due_date=task_data['dueDate'],
+                    priority=task_data['priority'],
+                    tags=task_data['tags'],
+                    difficulty=task_data['difficulty'],
+                    estimate_minutes=task_data['estimateMinutes']
+                )
+                
+                if task_result:
+                    # Log the auto-task creation
+                    database_personal.log_action(
+                        supabase=self.supabase,
+                        user_id=user_id,
+                        action_type="task_auto_created",
+                        entity_type="task",
+                        action_details={
+                            "task_title": task_data['title'],
+                            "category": task_data['category'],
+                            "created_from": "reminder",
+                            "auto_created": True
+                        },
+                        success_status=True
+                    )
+                    
+                    return {
+                        "task_created": True,
+                        "task_id": task_result.get('id'),
+                        "task_title": task_data['title']
+                    }
+            
+            return {"task_created": False, "reason": "Similar task already exists"}
+            
+        except Exception as e:
+            print(f"Error ensuring task exists for reminder: {e}")
+            return {"task_created": False, "error": str(e)}
+    
+    async def _create_reminder_with_details(self, user_id, reminder_text, reminder_time, reminder_type):
+        """Create a reminder with detailed information and auto-create task if needed"""
+        try:
+            # First, ensure a task exists for this reminder (as per requirements)
+            task_result = await self._ensure_task_exists_for_reminder(user_id, reminder_text, reminder_time)
+            
+            # Use the correct database function to create a reminder
+            reminder_data = database_personal.add_reminder(
+                supabase=self.supabase,
+                user_id=user_id,
+                reminder_text=reminder_text,
+                reminder_time=reminder_time,
+                reminder_type=reminder_type
+            )
+            
+            # Log the reminder creation
+            database_personal.log_action(
+                supabase=self.supabase,
+                user_id=user_id,
+                action_type="reminder_created",
+                entity_type="reminder",
+                action_details={
+                    "reminder_text": reminder_text,
+                    "reminder_time": str(reminder_time) if reminder_time else None,
+                    "reminder_type": reminder_type,
+                    "task_auto_created": task_result.get('task_created', False),
+                    "task_id": task_result.get('task_id')
+                },
+                success_status=True
+            )
+            
+            # Return reminder data with task creation info
+            result = {
+                "id": reminder_data.get('id') if reminder_data else None,
+                "task_auto_created": task_result.get('task_created', False)
+            }
+            
+            if task_result.get('task_created'):
+                result["auto_created_task"] = {
+                    "id": task_result.get('task_id'),
+                    "title": task_result.get('task_title')
+                }
+            
+            return result
+            
+        except Exception as e:
+            print(f"Error creating reminder: {e}")
+            return None
