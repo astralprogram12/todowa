@@ -5,6 +5,7 @@ import asyncio
 import traceback
 import os
 from typing import Dict, Any, Optional, List, Tuple
+from .tool_collections.communication_tools import send_reply_message
 
 from .agents import (
     BaseAgent,
