@@ -2,7 +2,7 @@ from .base_agent import BaseAgent
 
 class HelpAgent(BaseAgent):
     def __init__(self, supabase, ai_model):
-        super().__init__(supabase_manager, gemini_manager)
+        super().__init__(supabase, ai_model, "HelpAgent")
         self.agent_type = "help"
 
     async def process(self, user_input, context, routing_info=None):
@@ -58,7 +58,7 @@ Incorporate these assumptions confidently and provide targeted assistance.
 Provide clear, actionable help information.
 """
 
-            response = await self.gemini_manager.generate_response(
+            response = await self.ai_model.generate_response(
                 system_prompt, user_prompt
             )
             

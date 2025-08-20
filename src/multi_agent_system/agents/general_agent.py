@@ -2,7 +2,7 @@ from .base_agent import BaseAgent
 
 class GeneralAgent(BaseAgent):
     def __init__(self, supabase, ai_model):
-        super().__init__(supabase_manager, gemini_manager)
+        super().__init__(supabase, ai_model, "GeneralAgent")
         self.agent_type = "general"
 
     async def process(self, user_input, context, routing_info=None):
@@ -50,7 +50,7 @@ Guidelines:
 - Keep responses concise but informative
 """
 
-            response = await self.gemini_manager.generate_response(
+            response = await self.ai_model.generate_response(
                 system_prompt, user_prompt
             )
             
