@@ -5,6 +5,7 @@ import os
 import sys
 import json
 import traceback
+import asyncio # <--- [THE FIX] IMPORT THE ASYNCIO LIBRARY
 
 # --- 1. Add Project Directories to Python Path ---
 # This ensures that imports from 'src' and root-level files work correctly.
@@ -26,9 +27,7 @@ from src.multi_agent_system.orchestrator import Orchestrator
 # --- 3. Create and Initialize the Flask App ---
 app = Flask(__name__)
 
-# --- [THE BULLETPROOF FIX] ---
-# Initialize all services and the agent system directly in this file.
-# These variables will be populated immediately when the file is loaded by Vercel.
+# --- Initialize all services and the agent system directly in this file ---
 try:
     print("--- [APP.PY] INITIALIZATION STARTED ---")
 
@@ -39,11 +38,9 @@ try:
     print("[APP.PY] Initializing Supabase client...")
     supabase: Client = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
     
-    # 1. Create the Orchestrator instance. This is fast.
     print("[APP.PY] Creating Orchestrator instance...")
     multi_agent_system = Orchestrator(supabase, model)
 
-    # 2. Now, do the slow work of loading prompts.
     print("[APP.PY] Warming up agent by loading prompts...")
     prompts_dir = os.path.join(current_dir, 'prompts')
     multi_agent_system.load_all_agent_prompts(prompts_dir)
@@ -53,16 +50,12 @@ try:
 except Exception as e:
     print(f"FATAL: Application failed to initialize in app.py.")
     traceback.print_exc()
-    # If initialization fails, we set the agent to None so webhooks will report an error
     multi_agent_system = None
-# --- [END OF FIX] ---
-
 
 # --- 4. Define Webhook and Other Routes ---
 @app.route('/webhook', methods=['POST'])
 def webhook():
     """Main webhook endpoint for processing incoming messages."""
-    # This check is now more of a safety net. If initialization failed, this will catch it.
     if multi_agent_system is None:
         print("Webhook Error: multi_agent_system is None. Initialization likely failed during startup.")
         return jsonify({"error": "Internal server error: The agent system is not available."}), 500
@@ -78,11 +71,13 @@ def webhook():
         if not user_id or not message_text:
             return jsonify({"error": "Missing user identifier or message text"}), 400
         
-        # Call the agent system to process the message
-        # NOTE: The agent's process_user_input is async, but Flask routes are sync.
-        # This is a complex topic. For now, we assume your agent can be called from a sync context,
-        # but this might need adjustment later if you see errors about async loops.
-        response = multi_agent_system.process_user_input(user_id, message_text)
+        # --- [THE FIX] ---
+        # Use asyncio.run() to execute the async function and get its result.
+        # This resolves the "coroutine was never awaited" error.
+        print("[WEBHOOK] Calling async agent from sync context...")
+        response = asyncio.run(multi_agent_system.process_user_input(user_id, message_text))
+        print(f"[WEBHOOK] Agent returned response: {response}")
+        # --- [END OF FIX] ---
         
         return jsonify({"success": True, "response": response})
 
