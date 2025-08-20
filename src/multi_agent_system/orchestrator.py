@@ -48,7 +48,7 @@ class Orchestrator:
         print("...All agent prompts loaded.")
 
     async def process_user_input(self, user_id: str, user_input: str, phone_number: str, conversation_id: Optional[str] = None):
-        """Process user input with transactional agent logic and always send a reply."""
+        """Process user input with transactional logic and graceful handling of uncertainty."""
         final_response_dict = {}
         try:
             is_silent, session = await self._check_silent_mode(user_id)
@@ -59,40 +59,42 @@ class Orchestrator:
             classification = await self._classify_user_input(user_input, context)
             print(f"AI Classification: {classification}")
             
-            # --- [THE FIX] Transactional agent execution ---
             agent_responses = []
-            
-            # 1. Process primary intent first.
             primary_agent_name = classification.get('primary_intent')
-            if primary_agent_name in self.agents:
+
+            # --- [THE FIX] Handle the 'clarification_needed' intent ---
+            if primary_agent_name == 'clarification_needed':
+                final_response_dict = {
+                    "message": "I'm not quite sure what you mean. Could you please rephrase that?",
+                    "status": "clarification_needed"
+                }
+            # --- [END OF FIX] ---
+            
+            # --- Transactional agent execution (if intent is clear) ---
+            elif primary_agent_name in self.agents:
                 print(f"Processing with primary agent: {primary_agent_name}")
                 primary_response = await self.agents[primary_agent_name].process(
                     user_input, context, classification
                 )
                 agent_responses.append(primary_response)
                 
-                # 2. ONLY if the primary agent succeeds, process secondary intents.
                 if primary_response.get('status') == 'success':
                     for secondary_agent_name in classification.get('secondary_intents', []):
                         if secondary_agent_name in self.agents and secondary_agent_name != primary_agent_name:
-                            print(f"Processing with secondary agent: {secondary_agent_name}")
                             secondary_response = await self.agents[secondary_agent_name].process(
                                 user_input, context, classification
                             )
                             agent_responses.append(secondary_response)
                 else:
-                    print("Primary agent failed. Skipping secondary agents to ensure data consistency.")
-            # --- [END OF FIX] ---
+                    print("Primary agent failed. Skipping secondary agents.")
             
-            # 3. Combine responses using the new intelligent combiner.
+            # Combine responses using the intelligent combiner
             if agent_responses:
                 final_response_dict = ResponseCombiner.combine_responses(
                     agent_responses, classification
                 )
-            else:
-                final_response_dict = {"message": "I can help with that.", "status": "success"}
-
-            # Update context (unchanged)
+            
+            # Update context
             context['last_agent'] = classification.get('primary_intent')
             context['last_input'] = user_input
             context['last_response'] = final_response_dict.get('message')
