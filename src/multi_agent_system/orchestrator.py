@@ -47,7 +47,6 @@ class Orchestrator:
                 agent.load_prompts(prompts_dir)
         print("...All agent prompts loaded.")
 
-    # --- [THE FIX] Added 'phone_number' to the function signature ---
     async def process_user_input(self, user_id: str, user_input: str, phone_number: str, conversation_id: Optional[str] = None):
         """Process user input, route to an agent, and ALWAYS send the reply."""
         final_response_dict = {}
@@ -55,48 +54,37 @@ class Orchestrator:
             # High-priority check for silent mode
             is_silent, session = await self._check_silent_mode(user_id)
             if is_silent and 'silent' not in user_input.lower():
-                # We do not send a reply in silent mode
                 return {"message": "Silent mode is active. Message recorded.", "actions": []}
 
             # Normal agent processing to determine a response
             context = await self._get_or_create_context(user_id, conversation_id)
-            context['last_input'] = user_input
-            
             classification = await self._classify_user_input(user_input, context)
             agent_type = classification['agent_type']
             
-            # --- This is where the AI "thinks" of a response ---
-            if classification['confidence'] >= 0.4:
-                if agent_type in self.agents:
-                    # The responsible agent processes the request
-                    final_response_dict = await self.agents[agent_type].process(user_input, context)
-                else:
-                    final_response_dict = {"message": "I'm not sure how to handle that request right now."}
+            if classification['confidence'] >= 0.4 and agent_type in self.agents:
+                final_response_dict = await self.agents[agent_type].process(user_input, context)
             else:
                 final_response_dict = {"message": "I'm not sure I understand. Could you please clarify?"}
-            # --- End of AI thinking ---
 
             # --- ALWAYS SEND THE REPLY (unless silent mode) ---
             message_to_send = final_response_dict.get('message')
             if message_to_send:
                 print(f"Orchestrator sending final reply to {phone_number}: '{message_to_send}'")
-                # We call the communication tool directly to send the message.
-                await send_reply_message(
+                # --- [THE FIX] Removed 'await' because send_reply_message is a normal function ---
+                send_reply_message(
                     supabase_client=self.supabase, 
                     user_id=user_id, 
                     phone_number=phone_number, 
                     message=message_to_send
                 )
-            # --- End of sending reply ---
-
-            # Return the agent's internal thoughts for logging in Vercel
+            
             return final_response_dict
 
         except Exception as e:
             traceback.print_exc()
             error_message = "I encountered an error while processing your request. Please try again."
-            # Also try to send the error message back to the user
-            await send_reply_message(self.supabase, user_id, phone_number, error_message)
+            # --- [THE FIX] Also removed 'await' here ---
+            send_reply_message(self.supabase, user_id, phone_number, error_message)
             return {"message": "An internal error occurred.", "error": str(e)}
 
     async def _check_silent_mode(self, user_id):
