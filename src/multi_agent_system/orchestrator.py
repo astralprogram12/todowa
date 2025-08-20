@@ -15,7 +15,7 @@ from .tool_collections.communication_tools import send_reply_message
 from .agents import (
     BaseAgent, TaskAgent, ReminderAgent, SilentModeAgent,
     CoderAgent, AuditAgent, ExpertAgent, GuideAgent,
-    IntentClassifierAgent 
+    IntentClassifierAgent , InformationAgent, GeneralAgent
 )
 from .response_combiner import ResponseCombiner  # NEW
 
@@ -43,6 +43,8 @@ class Orchestrator:
         self.agents['audit'] = AuditAgent(self.supabase, self.ai_model)
         self.agents['expert'] = ExpertAgent(self.supabase, self.ai_model)
         self.agents['guide'] = GuideAgent(self.supabase, self.ai_model)
+        self.agents['information'] = InformationAgent(self.supabase, self.ai_model)
+        self.agents['general'] = GeneralAgent(self.supabase,  self.ai_model )
 
     def load_all_agent_prompts(self, prompts_dir: str):
         """Loads system prompts from files into each respective agent."""
