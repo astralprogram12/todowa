@@ -120,7 +120,7 @@ class Orchestrator:
     # ... (the rest of your _check_silent_mode, _classify_user_input, and _get_or_create_context methods remain the same)
     async def _check_silent_mode(self, user_id):
         try:
-            from database_silent import get_active_silent_session
+            from database_personal import get_active_silent_session
             session = get_active_silent_session(self.supabase, user_id)
             return session is not None, session
         except Exception as e:
