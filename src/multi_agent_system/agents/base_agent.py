@@ -2,7 +2,7 @@
 # Now integrates the tools system via the AgentToolsMixin
 
 import os
-from .agent_tools_mixin import AgentToolsMixin
+from ..agent_tools_mixin import AgentToolsMixin
 
 class BaseAgent(AgentToolsMixin):
     """Base agent class with common functionality for all agents."""
