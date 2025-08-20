@@ -1,10 +1,13 @@
-# database_personal.py (Correct, Final, and Verified Version)
+# database.py (Consolidated Version)
+# This is now the single source of truth for all database operations.
+
 from supabase import Client
-from datetime import date, datetime
+from datetime import date, datetime, timezone, timedelta
 import uuid
+import json
 from config import UNVERIFIED_LIMIT, VERIFIED_LIMIT
 
-# --- User and Usage Functions ---
+# --- User & Usage ---
 
 def get_user_id_by_phone(supabase: Client, phone: str) -> str | None:
     """Gets a user's UUID from their phone number."""
@@ -47,35 +50,31 @@ def check_and_update_usage(supabase: Client, sender_phone: str, user_id: str | N
         print(f"!!! DATABASE ERROR in check_and_update_usage: {e}")
         return (False, "Sorry, I'm having trouble with my database right now.")
 
-# --- AI Context Functions ---
+# --- AI Context Gathering ---
 
 def get_user_context_for_ai(supabase: Client, user_id: str) -> dict:
-    """Fetches user-specific context: timezone and schedule limit."""
+    """Fetches all user-specific context for the AI."""
     try:
-        res = supabase.table('user_whatsapp').select('timezone, schedule_limit').eq('user_id', user_id).execute()
+        res = supabase.table('user_whatsapp').select('timezone, schedule_limit, auto_silent_enabled, auto_silent_start_hour, auto_silent_end_hour').eq('user_id', user_id).execute()
+        context = {"timezone": "UTC", "schedule_limit": 5, "auto_silent_enabled": True, "auto_silent_start_hour": 7, "auto_silent_end_hour": 11}
         if res.data:
-            return res.data[0]
-        return {"timezone": "UTC", "schedule_limit": 5} # Safe defaults
+            context.update(res.data[0])
+        return context
     except Exception as e:
         print(f"!!! DATABASE ERROR in get_user_context_for_ai: {e}")
         return {"timezone": "UTC", "schedule_limit": 5}
 
-
-
 def get_task_context_for_ai(supabase: Client, user_id: str) -> dict:
-    """Fetches recent tasks for a user, including reminder info."""
+    """Fetches recent tasks for a user."""
     try:
-        tasks_res = supabase.table('tasks').select(
-            'id, title, status, due_date, reminder_at, category'
-        ).eq('user_id', user_id).order('created_at', desc=True).limit(50).execute()
-        return {"memories": tasks_res.data or []}        
-
+        tasks_res = supabase.table('tasks').select('id, title, status, due_date, reminder_at, category').eq('user_id', user_id).order('created_at', desc=True).limit(50).execute()
+        return {"tasks": tasks_res.data or []}
     except Exception as e:
         print(f"!!! DATABASE ERROR in get_task_context_for_ai: {e}")
         return {"tasks": []}
 
 def get_memory_context_for_ai(supabase: Client, user_id: str) -> dict:
-    """Fetches recent memories for a user, excluding conversation history."""
+    """Fetches recent memories for a user."""
     try:
         res = supabase.table('memory_entries').select('title, content, category, created_at').eq('user_id', user_id).neq('category', 'conversation_history').order('created_at', desc=True).limit(25).execute()
         return {"memories": res.data or []}
@@ -83,10 +82,20 @@ def get_memory_context_for_ai(supabase: Client, user_id: str) -> dict:
         print(f"!!! DATABASE ERROR in get_memory_context_for_ai: {e}")
         return {"memories": []}
 
+def get_journal_context_for_ai(supabase: Client, user_id: str) -> dict:
+    """Fetches recent journal entries for context."""
+    try:
+        res = supabase.table('journals').select('title, content, category, created_at').eq('user_id', user_id).order('created_at', desc=True).limit(10).execute()
+        return {"journals": res.data or []}
+    except Exception as e:
+        print(f"!!! DATABASE ERROR in get_journal_context_for_ai: {e}")
+        return {"journals": []}
+
 # --- Task Functions ---
 
 def add_task_entry(supabase: Client, user_id: str, **kwargs):
     kwargs['user_id'] = user_id
+    if not kwargs.get('title') or len(kwargs['title'].strip()) == 0: raise ValueError("Task title cannot be empty.")
     res = supabase.table("tasks").insert(kwargs).execute()
     if getattr(res, "error", None): raise Exception(str(res.error))
     return (res.data or [None])[0]
@@ -107,32 +116,10 @@ def query_tasks(supabase: Client, user_id: str, **filters):
     if getattr(res, "error", None): raise Exception(str(res.error))
     return res.data or []
 
-# --- Memory Functions ---
+# --- Memory & Journal Functions ---
 
-def find_memory_by_title(supabase: Client, user_id: str, title_query: str):
-    """
-    Finds a single memory entry using a simple, direct ilike search on the whole phrase.
-    This is more robust against complex RLS policies.
-    """
-    try:
-        # Simple, direct search - just like the task search
-        res = supabase.table("memory_entries").select("*").eq("user_id", user_id).ilike("title", f"%{title_query}%").limit(1).execute()
-        return res.data[0] if res.data else None
-    except Exception as e:
-        print(f"!!! DATABASE ERROR in find_memory_by_title: {e}")
-        return None
-    
-    
 def add_memory_entry(supabase: Client, user_id: str, title: str, content: str | None = None, category: str | None = None):
-    """Adds a new memory entry to the database with validation."""
-    # --- [THE FIX] Add a validation block ---
-    if not title or len(title.strip()) == 0:
-        raise ValueError("Title cannot be empty.")
-    if len(title) > 255: # Assuming a max length for the title column
-        raise ValueError("Title is too long.")
-    # You can add more checks for content, category, etc.
-    # --- [END OF FIX] ---
-
+    if not title or len(title.strip()) == 0: raise ValueError("Title cannot be empty.")
     entry = {"user_id": user_id, "title": title.strip(), "content": content, "category": category}
     res = supabase.table("memory_entries").insert(entry).execute()
     if getattr(res, "error", None): raise Exception(str(res.error))
@@ -146,232 +133,112 @@ def update_memory_entry(supabase: Client, user_id: str, memory_id: str, patch: d
 def delete_memory_entry(supabase: Client, user_id: str, memory_id: str):
     supabase.table("memory_entries").delete().eq("id", memory_id).eq("user_id", user_id).execute()
 
-# In database_personal.py
 def search_memory_entries(supabase: Client, user_id: str, query: str, limit: int = 5):
-    """Searches memory entries by title and content securely."""
     try:
-        # Sanitize the query to prevent injection within the .or() f-string structure
         sanitized_query = query.replace("'", "''")
-
-        res = supabase.table("memory_entries").select("title, content, created_at") \
-            .eq("user_id", user_id) \
-            .or_(f"title.ilike.%{sanitized_query}%,content.ilike.%{sanitized_query}%") \
-            .order("created_at", desc=True).limit(limit).execute()
+        res = supabase.table("memory_entries").select("title, content, created_at").eq("user_id", user_id).or_(f"title.ilike.%{sanitized_query}%,content.ilike.%{sanitized_query}%").order("created_at", desc=True).limit(limit).execute()
         return res.data or []
     except Exception as e:
         print(f"!!! DATABASE ERROR in search_memory_entries: {e}")
         return []
 
-# --- Scheduled Action Functions ---
+def add_journal_entry(supabase: Client, user_id: str, title: str, content: str | None = None, category: str | None = None):
+    # This function is very similar to add_memory_entry
+    if not title or len(title.strip()) == 0: raise ValueError("Title cannot be empty.")
+    entry = {"user_id": user_id, "title": title.strip(), "content": content, "category": category}
+    res = supabase.table("journals").insert(entry).execute()
+    if getattr(res, "error", None): raise Exception(str(res.error))
+    return (res.data or [None])[0]
+
+# --- AI Action & Reminder Functions ---
+
 def get_all_reminders(supabase: Client, user_id: str) -> list:
-    """Fetches all tasks that have an active, non-sent reminder."""
     try:
-        res = supabase.table("tasks") \
-            .select("title, reminder_at") \
-            .eq("user_id", user_id) \
-            .not_.is_("reminder_at", "null") \
-            .eq("reminder_sent", False) \
-            .order("reminder_at", desc=False) \
-            .execute()
+        res = supabase.table("tasks").select("title, reminder_at").eq("user_id", user_id).not_.is_("reminder_at", "null").eq("reminder_sent", False).order("reminder_at", desc=False).execute()
         return res.data or []
     except Exception as e:
         print(f"!!! DATABASE ERROR in get_all_reminders: {e}")
         return []
 
-# --- RENAMED AI Action Functions ---
-
-def add_ai_action(supabase: Client, user_id: str, action_type: str, schedule_spec: str, next_run_at: str, timezone: str, description: str, payload: dict = None):
-    entry = {"user_id": user_id, "action_type": action_type, "schedule_spec": schedule_spec,
-             "next_run_at": next_run_at, "timezone": timezone, "description": description,
-             "action_payload": payload, "status": "active"}
-    res = supabase.table("ai_actions").insert(entry).execute() # Table name is now ai_actions
-    if getattr(res, "error", None): raise Exception(str(res.error))
-    return (res.data or [None])[0]
-
 def get_all_active_ai_actions(supabase: Client, user_id: str) -> list:
-    """Fetches all active AI Actions for a user."""
     try:
-        # This is the query we are testing.
         res = supabase.table("ai_actions").select("*").eq("user_id", user_id).eq("status", "active").execute()
         return res.data or []
     except Exception as e:
         print(f"!!! DATABASE ERROR in get_all_active_ai_actions: {e}")
         return []
-    
 
-def update_ai_action_entry(supabase: Client, user_id: str, action_id: str, patch: dict):
-    res = supabase.table("ai_actions").update(patch).eq("id", action_id).eq("user_id", user_id).execute()
-    if getattr(res, "error", None): raise Exception(str(res.error))
-    return (res.data or [None])[0]
+# --- Silent Mode Functions ---
 
-def delete_ai_action_entry(supabase: Client, user_id: str, action_id: str):
-    supabase.table("ai_actions").delete().eq("id", action_id).eq("user_id", user_id).execute()
-
-def count_active_ai_actions(supabase: Client, user_id: str) -> int:
+def create_silent_session(supabase: Client, user_id: str, duration_minutes: int, trigger_type: str = 'manual'):
     try:
-        res = supabase.table("ai_actions").select("id", count="exact").eq("user_id", user_id).eq("status", "active").execute()
-        return res.count
+        end_active_silent_sessions(supabase, user_id, 'system')
+        data = {'user_id': user_id, 'duration_minutes': duration_minutes, 'trigger_type': trigger_type, 'is_active': True, 'accumulated_actions': [], 'action_count': 0}
+        res = supabase.table('silent_sessions').insert(data).execute()
+        return res.data[0] if res.data else None
     except Exception as e:
-        print(f"!!! DATABASE ERROR in count_active_ai_actions: {e}")
+        print(f"!!! DATABASE ERROR in create_silent_session: {e}")
+        return None
+
+def get_active_silent_session(supabase: Client, user_id: str):
+    try:
+        res = supabase.table('silent_sessions').select('*').eq('user_id', user_id).eq('is_active', True).order('start_time', desc=True).limit(1).execute()
+        if res.data:
+            session = res.data[0]
+            start_time = datetime.fromisoformat(session['start_time'].replace('Z', '+00:00'))
+            end_time = start_time + timedelta(minutes=session['duration_minutes'])
+            if datetime.now(timezone.utc) > end_time:
+                end_silent_session(supabase, session['id'], 'expired')
+                return None
+            return session
+        return None
+    except Exception as e:
+        print(f"!!! DATABASE ERROR in get_active_silent_session: {e}")
+        return None
+
+def end_silent_session(supabase: Client, session_id: str, exit_reason: str = 'manual_exit'):
+    try:
+        session_res = supabase.table('silent_sessions').select('*').eq('id', session_id).execute()
+        if not session_res.data: return None
+        update_data = {'is_active': False, 'end_time': datetime.now(timezone.utc).isoformat(), 'exit_reason': exit_reason}
+        supabase.table('silent_sessions').update(update_data).eq('id', session_id).execute()
+        return session_res.data[0]
+    except Exception as e:
+        print(f"!!! DATABASE ERROR in end_silent_session: {e}")
+        return None
+
+def end_active_silent_sessions(supabase: Client, user_id: str, exit_reason: str = 'system'):
+    try:
+        res = supabase.table('silent_sessions').update({'is_active': False, 'end_time': datetime.now(timezone.utc).isoformat(), 'exit_reason': exit_reason}).eq('user_id', user_id).eq('is_active', True).execute()
+        return len(res.data)
+    except Exception as e:
+        print(f"!!! DATABASE ERROR in end_active_silent_sessions: {e}")
         return 0
-    
 
-def find_ai_action_by_description(supabase: Client, user_id: str, description_query: str):
-    """
-    Finds a single scheduled action using a more flexible keyword search.
-    It will match if the description contains ALL keywords from the query.
-    """
-    try:
-        # Split the AI's query into individual keywords
-        keywords = description_query.split()
-        
-        # Start the query
-        q = supabase.table("ai_actions").select("*").eq("user_id", user_id)
-        
-        # Add an 'ilike' filter for EACH keyword
-        for keyword in keywords:
-            q = q.ilike("description", f"%{keyword}%")
-            
-        # Limit to the first result that matches all keywords
-        res = q.limit(1).execute()
-        
-        return res.data[0] if res.data else None
-    except Exception as e:
-        print(f"!!! DATABASE ERROR in find_ai_action_by_description: {e}")
-        return None
+# --- Project Functions ---
 
-# --- Journal Functions ---
+def get_project_context_for_ai(supabase: Client, user_id: str):
+    # This is currently a placeholder and needs to be implemented with real queries.
+    return {
+        "user_context": {"name": "Budi", "username": "Budi#1234"},
+        "active_project": {"name": "Website Redesign", "id": "proj-uuid-abcde"},
+        "user_role_in_project": {"name": "Admin", "permissions": ["can_add_task", "can_confirm_tasks"]},
+        "project_tasks": [{"title": "Draft homepage mockups", "assignees": ["Andi#5567"]}],
+    }
 
-def find_journal_by_title(supabase: Client, user_id: str, title_query: str):
-    """Finds a single journal entry using a title search."""
-    try:
-        res = supabase.table("journals").select("*").eq("user_id", user_id).ilike("title", f"%{title_query}%").limit(1).execute()
-        return res.data[0] if res.data else None
-    except Exception as e:
-        print(f"!!! DATABASE ERROR in find_journal_by_title: {e}")
-        return None
-
-def add_journal_entry(supabase: Client, user_id: str, title: str, content: str | None = None, category: str | None = None):
-    """Adds a new journal entry to the database."""
-    entry = {"user_id": user_id, "title": title, "content": content, "category": category}
-    res = supabase.table("journals").insert(entry).execute()
-    if getattr(res, "error", None): raise Exception(str(res.error))
-    return (res.data or [None])[0]
-
-def update_journal_entry(supabase: Client, user_id: str, journal_id: str, patch: dict):
-    """Updates an existing journal entry."""
-    res = supabase.table("journals").update(patch).eq("id", journal_id).eq("user_id", user_id).execute()
-    if getattr(res, "error", None): raise Exception(str(res.error))
-    return (res.data or [None])[0]
-
-def delete_journal_entry(supabase: Client, user_id: str, journal_id: str):
-    """Deletes a journal entry from the database."""
-    supabase.table("journals").delete().eq("id", journal_id).eq("user_id", user_id).execute()
-
-def search_journal_entries(supabase: Client, user_id: str, query: str, limit: int = 5):
-    """Searches journal entries by title and content."""
-    try:
-        res = supabase.table("journals").select("title, content, category, created_at") \
-            .eq("user_id", user_id).or_(f"title.ilike.%{query}%,content.ilike.%{query}%") \
-            .order("created_at", desc=True).limit(limit).execute()
-        return res.data or []
-    except Exception as e:
-        print(f"!!! DATABASE ERROR in search_journal_entries: {e}")
-        return []
-
-def get_journal_context_for_ai(supabase: Client, user_id: str) -> dict:
-    """Fetches recent journal entries for context."""
-    try:
-        res = supabase.table('journals').select('title, content, category, created_at').eq('user_id', user_id).order('created_at', desc=True).limit(10).execute()
-        return {"journals": res.data or []}
-    except Exception as e:
-        print(f"!!! DATABASE ERROR in get_journal_context_for_ai: {e}")
-        return {"journals": []}
-
-# --- Conversation History Functions ---
-
-def store_conversation_history(supabase: Client, user_id: str, history: list):
-    """Stores conversation history in memory_entries with special category."""
-    import json
-    try:
-        # Delete existing conversation history
-        supabase.table('memory_entries').delete().eq('user_id', user_id).eq('category', 'conversation_history').execute()
-        
-        # Limit to last 10 messages or 5 complete conversations
-        limited_history = _limit_conversation_history(history)
-        
-        # Store new conversation history
-        if limited_history:
-            conversation_content = json.dumps(limited_history)
-            add_memory_entry(supabase, user_id, 
-                           title="Recent Conversation History", 
-                           content=conversation_content, 
-                           category="conversation_history")
-    except Exception as e:
-        print(f"!!! DATABASE ERROR in store_conversation_history: {e}")
-
-def get_conversation_history(supabase: Client, user_id: str) -> list:
-    """Retrieves conversation history from memory_entries."""
-    import json
-    try:
-        res = supabase.table('memory_entries').select('content').eq('user_id', user_id).eq('category', 'conversation_history').limit(1).execute()
-        if res.data and res.data[0].get('content'):
-            return json.loads(res.data[0]['content'])
-        return []
-    except Exception as e:
-        print(f"!!! DATABASE ERROR in get_conversation_history: {e}")
-        return []
-
-def _limit_conversation_history(history: list, max_messages: int = 10, max_conversations: int = 5) -> list:
-    """Limits conversation history to max_messages or max_conversations."""
-    if not history:
-        return []
-    
-    # First limit by number of messages
-    limited_by_messages = history[-max_messages:] if len(history) > max_messages else history
-    
-    # Then limit by number of complete conversations (user-assistant pairs)
-    conversation_count = 0
-    result = []
-    
-    # Count backwards to keep most recent conversations
-    for i in range(len(limited_by_messages) - 1, -1, -1):
-        msg = limited_by_messages[i]
-        result.insert(0, msg)
-        
-        # Count user messages as conversation starts
-        if msg.get('role') == 'user':
-            conversation_count += 1
-            if conversation_count >= max_conversations:
-                break
-    
-    return result
+# --- Logging Functions ---
 
 def log_action(supabase: Client, user_id: str, action_type: str, entity_type: str = None, 
                entity_id: str = None, action_details: dict = None, user_input: str = None,
                success_status: bool = True, error_details: str = None, execution_time_ms: int = None,
-               session_id: str = None) -> dict:
-    """Logs every action for analytics and insights."""
+               session_id: str = None):
     try:
         log_entry = {
-            "user_id": user_id,
-            "session_id": session_id or str(uuid.uuid4()),
-            "action_type": action_type,
-            "entity_type": entity_type,
-            "entity_id": entity_id,
-            "action_details": action_details or {},
-            "user_input": user_input,
-            "success_status": success_status,
-            "error_details": error_details,
-            "execution_time_ms": execution_time_ms,
-            "created_at": datetime.now().isoformat()
+            "user_id": user_id, "session_id": session_id or str(uuid.uuid4()), "action_type": action_type,
+            "entity_type": entity_type, "entity_id": entity_id, "action_details": action_details or {},
+            "user_input": user_input, "success_status": success_status, "error_details": error_details,
+            "execution_time_ms": execution_time_ms, "created_at": datetime.now().isoformat()
         }
-        
-        res = supabase.table("action_logs").insert(log_entry).execute()
-        if getattr(res, "error", None):
-            print(f"!!! DATABASE ERROR in log_action: {res.error}")
-            return None
-        return (res.data or [None])[0]
+        supabase.table("action_logs").insert(log_entry).execute()
     except Exception as e:
         print(f"!!! DATABASE ERROR in log_action: {e}")
-        return None
