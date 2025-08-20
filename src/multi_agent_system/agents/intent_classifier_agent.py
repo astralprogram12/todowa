@@ -32,12 +32,13 @@ User said: "{user_input}"
 Previous conversation: {context.get('history', [])}
 
 AVAILABLE AGENTS:
-- task: Fetch,Create, update, complete tasks  
+- task: list, Create, update, complete tasks  
 - reminder: Set time alerts
 - silent_mode: Manage quiet periods
 - expert: Give productivity advice
 - guide: Help with app features
-- chat: Social conversation
+- general: Social conversation
+- information: Trivial , Fact, Information
 
 RULES:
 1. NEVER say "I don't know" - always pick something

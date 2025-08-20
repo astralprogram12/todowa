@@ -15,7 +15,7 @@ from .tool_collections.communication_tools import send_reply_message
 from .agents import (
     BaseAgent, TaskAgent, ReminderAgent, SilentModeAgent,
     CoderAgent, AuditAgent, ExpertAgent, GuideAgent,
-    IntentClassifierAgent  # NEW
+    IntentClassifierAgent 
 )
 from .response_combiner import ResponseCombiner  # NEW
 
