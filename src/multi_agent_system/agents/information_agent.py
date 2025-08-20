@@ -1,111 +1,96 @@
+# src/multi_agent_system/agents/information_agent.py (CORRECTED & FINAL)
+
 from .base_agent import BaseAgent
+import json
+# Import the single, consolidated database_personal module
+import database_personal
 
 class InformationAgent(BaseAgent):
+    """
+    Agent responsible for providing factual information and storing new knowledge.
+    """
+    
     def __init__(self, supabase, ai_model):
-        super().__init__(supabase_manager, gemini_manager)
-        self.agent_type = "information"
+        """Initializes the InformationAgent with correct parameters."""
+        super().__init__(supabase, ai_model, agent_name="InformationAgent")
 
-    async def process(self, user_input, context, routing_info=None):
+    async def process(self, user_input: str, context: dict, routing_info: dict) -> dict:
         """
-        Process information requests and knowledge queries.
-        routing_info contains assumptions and confidence from IntentClassifierAgent.
+        Processes a user's request for information, generates a response,
+        and stores the new knowledge in the user's journal.
         """
         try:
-            # Use routing_info assumptions if available
             assumptions = routing_info.get('assumptions', {}) if routing_info else {}
             
-            # Load prompts
-            prompt_files = [
-                "01_main_system_prompt.md",
-                "02_information_agent_specific.md",
-                "03_context_understanding.md",
-                "04_response_formatting.md",
-                "05_datetime_handling.md",
-                "06_error_handling.md",
-                "07_conversation_flow.md",
-                "08_whatsapp_integration.md",
-                "09_intelligent_decision_tree.md"
-            ]
+            # load_prompts is synchronous and should not be awaited.
+            # This part may be removed later as per the bug report's recommendation (P3 bug).
+            system_prompt = self.load_prompts("prompts/v1") 
             
-            system_prompt = await self.load_prompts(prompt_files)
-            
-            # Add routing info to context if available
             enhanced_context = context.copy()
             if routing_info:
                 enhanced_context['routing_info'] = routing_info
                 enhanced_context['intent_assumptions'] = assumptions
             
-            # Process information request
             user_prompt = f"""
 User Input: {user_input}
 Context: {enhanced_context}
-
-This is an information or knowledge request. Provide accurate, helpful information.
-
-If routing assumptions suggest specific:
-- Information type (facts, explanations, how-to, etc.)
-- Subject matter or domain
-- Detail level needed
-
-Incorporate these assumptions confidently in your response.
-
-Guidelines:
-- Provide clear, accurate information
-- Structure responses logically
-- Include relevant details
-- Cite sources when appropriate
-- Offer to clarify or expand if needed
+Provide a clear and accurate response to the user's information request based on the context and your general knowledge.
+Incorporate these assumptions from the intent classifier: {assumptions}
 """
-
-            response = await self.gemini_manager.generate_response(
-                system_prompt, user_prompt
+            # Use the correct AI model (self.ai_model) and method (generate_content)
+            response = await self.ai_model.generate_content(
+                [system_prompt, user_prompt]
             )
-            
-            # Check if we should store this information for future reference
-            should_store = await self._should_store_information(user_input, response, assumptions)
+            response_text = response.text
+
+            # Determine if this new knowledge is valuable enough to store
+            should_store = self._should_store_information(user_input)
             
             result = {
-                "message": response,
-                "actions": ["information_provided"],
-                "data": {
-                    "topic": assumptions.get('topic', 'general'),
-                    "information_type": assumptions.get('information_type', 'factual')
-                }
+                "status": "success",
+                "message": response_text,
+                "actions": [{"agent": self.agent_name, "action": "information_provided"}]
             }
             
             if should_store:
-                await self._store_information_exchange(user_input, response, enhanced_context)
-                result["actions"].append("information_stored")
+                self._store_information_exchange(user_input, response_text, context)
+                result["actions"].append({"action": "knowledge_stored_in_journal"})
             
             return result
             
         except Exception as e:
+            print(f"!!! ERROR in InformationAgent process: {e}")
             return {
-                "message": "I'm having trouble retrieving that information right now. Could you please try rephrasing your question?",
-                "actions": ["error"],
+                "status": "error",
+                "message": "I'm having trouble retrieving that information right now. Please try rephrasing your question.",
                 "error": str(e)
             }
 
-    async def _should_store_information(self, user_input, response, assumptions):
-        """Determine if this information exchange should be stored for future reference"""
-        try:
-            # Store information that might be useful for future conversations
-            store_keywords = ['how to', 'what is', 'explain', 'definition', 'procedure']
-            return any(keyword in user_input.lower() for keyword in store_keywords)
-        except:
-            return False
+    def _should_store_information(self, user_input: str) -> bool:
+        """Determine if this information exchange should be stored as knowledge."""
+        # Simple heuristic: store questions that ask for explanations or definitions.
+        store_keywords = ['how to', 'what is', 'what are', 'explain', 'definition', 'procedure']
+        return any(keyword in user_input.lower() for keyword in store_keywords)
 
-    async def _store_information_exchange(self, user_input, response, context):
-        """Store information exchange for future reference"""
+    def _store_information_exchange(self, user_input: str, response: str, context: dict):
+        """
+        Store the valuable question and answer in the JOURNALS table for future reference.
+        """
         try:
-            data = {
-                "question": user_input,
-                "answer": response,
-                "context": context,
-                "timestamp": context.get('timestamp'),
-                "agent_type": "information"
-            }
-            
-            await self.supabase_manager.create_record('information_exchanges', data)
+            user_id = context.get('user_id')
+            if not user_id:
+                print("Cannot store information exchange, user_id not found in context.")
+                return
+
+            # Use the correct add_journal_entry function from the consolidated database_personal module.
+            database_personal.add_journal_entry(
+                supabase=self.supabase,
+                user_id=user_id,
+                title=f"Learned: {user_input[:60]}...", # Truncate for a clean title
+                content=f"Q: {user_input}\nA: {response}", # Store the full Q&A in the content
+                category="learned_knowledge"
+            )
+            print(f"Stored new knowledge in journal for user {user_id}")
         except Exception as e:
-            print(f"Error storing information exchange: {e}")
+            # Log the error but don't crash the main agent flow
+            print(f"!!! database_personal ERROR in _store_information_exchange: {e}")
