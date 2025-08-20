@@ -3,17 +3,21 @@
 
 import os
 
-# --- [THE FIX] ---
-# The import path now correctly points to the file named 'enhanced_agent_tools_mixin.py'
-from src.multi_agent_system.enhanced_agent_tools_mixin import AgentToolsMixin
+# --- [THE FIX - Part 1] ---
+# Import the class with the correct name 'EnhancedAgentToolsMixin'
+# from the file with the correct name 'enhanced_agent_tools_mixin'
+from src.multi_agent_system.enhanced_agent_tools_mixin import EnhancedAgentToolsMixin
 # --- End of Fix ---
 
-class BaseAgent(AgentToolsMixin):
+# --- [THE FIX - Part 2] ---
+# Inherit from the correctly named class
+class BaseAgent(EnhancedAgentToolsMixin):
+# --- End of Fix ---
     """Base agent class with common functionality for all agents."""
 
     def __init__(self, supabase, ai_model, agent_name=None):
         """Initialize the base agent with required dependencies."""
-        super().__init__()  # Initialize the AgentToolsMixin
+        super().__init__()  # Initialize the EnhancedAgentToolsMixin
         self.supabase = supabase
         self.ai_model = ai_model
         self.agent_name = agent_name or self.__class__.__name__
@@ -78,10 +82,11 @@ class BaseAgent(AgentToolsMixin):
     async def _get_user_timezone(self, user_id):
         """Get the user's timezone from their preferences."""
         try:
-            tool_result = await self.use_tool("get_user_memory", user_id=user_id, key="timezone")
+            # NOTE: Your new mixin uses 'execute_tool', not 'use_tool'
+            tool_result = self.execute_tool("get_user_memory", user_id=user_id, key="timezone")
             
-            if tool_result['status'] == 'success' and tool_result['result']:
-                return tool_result['result']
+            if tool_result['success'] and tool_result['data']:
+                return tool_result['data']
             
             preferences = self.supabase.table("user_preferences").select("*").eq("user_id", user_id).execute()
             if preferences.data:
@@ -95,13 +100,13 @@ class BaseAgent(AgentToolsMixin):
     async def convert_utc_to_user_timezone(self, user_id, utc_time_str):
         """Convert a UTC time string to the user's local timezone."""
         try:
-            tool_result = await self.use_tool(
+            tool_result = self.execute_tool(
                 "convert_utc_to_user_timezone", supabase=self.supabase,
                 user_id=user_id, utc_time_str=utc_time_str
             )
             
-            if tool_result['status'] == 'success':
-                return tool_result['result']
+            if tool_result['success']:
+                return tool_result['data']
             else:
                 return utc_time_str
         except Exception as e:
@@ -116,23 +121,10 @@ class BaseAgent(AgentToolsMixin):
     
     async def get_tool_suggestions(self, user_input):
         """Get tool suggestions based on user input."""
-        return self.suggest_tools(user_input)
+        # NOTE: Your new mixin has a different method for suggestions
+        return self.smart_tool_suggestion(user_input)
     
     async def execute_tools_chain(self, tools_chain, context):
         """Execute a chain of tools in sequence."""
-        results = []
-        
-        for tool_spec in tools_chain:
-            tool_name = tool_spec.get('name')
-            tool_params = tool_spec.get('params', {})
-            
-            if 'user_id' in tool_params and not tool_params['user_id'] and 'user_id' in context:
-                tool_params['user_id'] = context['user_id']
-            
-            tool_result = await self.use_tool(tool_name, **tool_params)
-            results.append(tool_result)
-            
-            if tool_result['status'] == 'error':
-                break
-        
-        return results
+        # NOTE: Your new mixin has a bulk execute method
+        return self.bulk_execute_tools(tools_chain)
