@@ -1,113 +1,88 @@
-import json
-from flask import Flask, request, jsonify
-from supabase import create_client, Client
-import google.generativeai as genai
-import traceback
-import sys
+# app.py
+# This file now contains the Flask app AND its full initialization logic.
+
 import os
+import sys
+import json
+import traceback
 
-# --- Boilerplate Setup ---
-# Get current directory (where app.py is located)
+# --- 1. Add Project Directories to Python Path ---
+# This ensures that imports from 'src' and root-level files work correctly.
 current_dir = os.path.dirname(os.path.abspath(__file__))
-
-# Add current directory to path
 if current_dir not in sys.path:
     sys.path.append(current_dir)
-
-# Add src directory to path
 src_dir = os.path.join(current_dir, 'src')
 if src_dir not in sys.path:
     sys.path.append(src_dir)
 
-# --- Local Imports ---
-# Import original modules - these will be imported from Supabase integration
-import config
+# --- 2. Import All Necessary Modules ---
+import google.generativeai as genai
+from supabase import create_client, Client
+from flask import Flask, request, jsonify
 
-# --- Initialization ---
+import config
+from src.multi_agent_system.orchestrator import Orchestrator
+
+# --- 3. Create and Initialize the Flask App ---
 app = Flask(__name__)
 
-# These variables will be set by a runner script (e.g., run.py)
-supabase = None
-model = None
-multi_agent_system = None
+# --- [THE BULLETPROOF FIX] ---
+# Initialize all services and the agent system directly in this file.
+# These variables will be populated immediately when the file is loaded by Vercel.
+try:
+    print("--- [APP.PY] INITIALIZATION STARTED ---")
 
-# In-memory cache for conversation history.
-# For production, consider using a persistent cache like Redis.
-CONVERSATION_HISTORIES = {}
+    print("[APP.PY] Initializing Google Generative AI...")
+    genai.configure(api_key=config.GEMINI_API_KEY)
+    model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
-
-@app.route('/test-actions', methods=['GET'])
-def test_list_ai_actions():
-    """A simple test endpoint to fetch AI Actions directly, bypassing the AI."""
-    print("\n--- RUNNING DIRECT DATABASE TEST FOR AI ACTIONS ---")
+    print("[APP.PY] Initializing Supabase client...")
+    supabase: Client = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
     
-    # !!! IMPORTANT !!!
-    # REPLACE this placeholder with YOUR actual user_id from the Supabase screenshot.
-    test_user_id = 'cf750539-b5f8-41fa-be5b-41298e19547d'
-    
-    try:
-        # Make sure supabase is initialized
-        if not supabase:
-            return jsonify({"error": "Supabase client not initialized"}), 500
-        
-        # Import database functions through supabase_integration
-        from src.multi_agent_system.tool_collections.database_tools import get_all_active_ai_actions
-        
-        # Query actions
-        actions = get_all_active_ai_actions(supabase, test_user_id)
-        return jsonify({"success": True, "actions": actions})
-    except Exception as e:
-        print(f"Error in test endpoint: {str(e)}")
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+    # 1. Create the Orchestrator instance. This is fast.
+    print("[APP.PY] Creating Orchestrator instance...")
+    multi_agent_system = Orchestrator(supabase, model)
+
+    # 2. Now, do the slow work of loading prompts.
+    print("[APP.PY] Warming up agent by loading prompts...")
+    prompts_dir = os.path.join(current_dir, 'prompts')
+    multi_agent_system.load_all_agent_prompts(prompts_dir)
+
+    print("--- [APP.PY] INITIALIZATION COMPLETE. Agent is ready. ---")
+
+except Exception as e:
+    print(f"FATAL: Application failed to initialize in app.py.")
+    traceback.print_exc()
+    # If initialization fails, we set the agent to None so webhooks will report an error
+    multi_agent_system = None
+# --- [END OF FIX] ---
 
 
+# --- 4. Define Webhook and Other Routes ---
 @app.route('/webhook', methods=['POST'])
 def webhook():
     """Main webhook endpoint for processing incoming messages."""
+    # This check is now more of a safety net. If initialization failed, this will catch it.
+    if multi_agent_system is None:
+        print("Webhook Error: multi_agent_system is None. Initialization likely failed during startup.")
+        return jsonify({"error": "Internal server error: The agent system is not available."}), 500
+
     try:
-        # Step 1: Get the raw request body as text.
         raw_data = request.get_data(as_text=True)
-
-        if not raw_data:
-            print("Webhook Error: Received an empty request body.")
-            return jsonify({"error": "Empty request body received"}), 400
-
-        # Step 2: Manually parse the raw text data into a Python dictionary.
-        try:
-            data = json.loads(raw_data)
-        except json.JSONDecodeError:
-            print(f"Webhook Error: Failed to decode JSON. Raw data received: {raw_data}")
-            return jsonify({"error": "Invalid JSON format in request body"}), 400
-
-        # Step 3: Verify that the parsed data is a dictionary.
-        if not isinstance(data, dict):
-            print(f"Webhook Error: JSON did not parse into a dictionary. Type: {type(data)}")
-            return jsonify({"error": "Request body must be a JSON object"}), 400
-
+        data = json.loads(raw_data)
         print(f"Webhook successfully parsed data: {data}")
 
-        # Step 4: Extract user ID and message text based on the CORRECT JSON structure.
-        # This logic is now matched to the data you received.
-        
-        # Using 'pengirim' for the user ID. Fallback to 'sender' if it doesn't exist.
         user_id = data.get('pengirim') or data.get('sender')
-        
-        # Using 'pesan' for the message text. Fallback to 'message' if it doesn't exist.
         message_text = data.get('pesan') or data.get('message')
 
-        # Step 5: Validate that we found the necessary data.
         if not user_id or not message_text:
-            print(f"Webhook Error: Missing 'pengirim'/'sender' or 'pesan'/'message'. UserID: {user_id}, Message: {message_text}")
-            return jsonify({"error": "Missing user identifier or message text in JSON body"}), 400
+            return jsonify({"error": "Missing user identifier or message text"}), 400
         
-        # Ensure the agent system is ready before processing
-        if multi_agent_system is None:
-            print("Webhook Error: multi_agent_system is not initialized.")
-            return jsonify({"error": "Internal server error: agent system not ready"}), 500
-
-        # Process the message through the multi-agent system
-        response = multi_agent_system.process_message(user_id, message_text)
+        # Call the agent system to process the message
+        # NOTE: The agent's process_user_input is async, but Flask routes are sync.
+        # This is a complex topic. For now, we assume your agent can be called from a sync context,
+        # but this might need adjustment later if you see errors about async loops.
+        response = multi_agent_system.process_user_input(user_id, message_text)
         
         return jsonify({"success": True, "response": response})
 
@@ -116,8 +91,10 @@ def webhook():
         traceback.print_exc()
         return jsonify({"error": f"An internal server error occurred: {str(e)}"}), 500
 
-
 @app.route('/health', methods=['GET'])
 def health_check():
     """Simple health check endpoint."""
-    return jsonify({"status": "healthy", "message": "Multi-agent system with Supabase is running"})
+    if multi_agent_system:
+        return jsonify({"status": "healthy", "message": "Multi-agent system is initialized."})
+    else:
+        return jsonify({"status": "unhealthy", "message": "Multi-agent system failed to initialize."}), 500
