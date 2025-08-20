@@ -6,6 +6,8 @@ import sys
 import json
 import traceback
 import asyncio # <--- [THE FIX] IMPORT THE ASYNCIO LIBRARY
+import database_personal
+
 
 # --- 1. Add Project Directories to Python Path ---
 # This ensures that imports from 'src' and root-level files work correctly.
@@ -65,28 +67,38 @@ def webhook():
         data = json.loads(raw_data)
         print(f"Webhook successfully parsed data: {data}")
 
-        user_id = data.get('pengirim') or data.get('sender')
+        sender_phone = data.get('pengirim') or data.get('sender')
         message_text = data.get('pesan') or data.get('message')
 
-        if not user_id or not message_text:
-            return jsonify({"error": "Missing user identifier or message text"}), 400
+        if not sender_phone or not message_text:
+            return jsonify({"error": "Missing sender phone number or message text"}), 400
         
-        # --- [THE FIX] ---
-        # Use asyncio.run() to execute the async function and get its result.
-        # This resolves the "coroutine was never awaited" error.
-        print("[WEBHOOK] Calling async agent from sync context...")
-        response = asyncio.run(multi_agent_system.process_user_input(user_id, message_text))
-        print(f"[WEBHOOK] Agent returned response: {response}")
+        # --- [THE FIX] LOOK UP THE REAL USER ID ---
+        # 1. Call the function that ALREADY EXISTS in your database_personal.py file.
+        real_user_id = database_personal.get_user_id_by_phone(supabase, sender_phone)
+        
+        # 2. Handle the case where the user is not registered in your system.
+        if not real_user_id:
+            print(f"Unauthorized access attempt from phone number: {sender_phone}")
+            # For now, we return an error. You could also send a message back here.
+            return jsonify({"error": "User not found for this phone number."}), 404
+
+        # 3. Call the agent system with the CORRECT UUID and the phone number.
+        print(f"[WEBHOOK] Calling async agent for user_id {real_user_id}...")
+        response = asyncio.run(multi_agent_system.process_user_input(
+            user_id=real_user_id,          # Pass the UUID here
+            user_input=message_text,
+            phone_number=sender_phone      # Pass the phone number separately for replies
+        ))
+        print(f"[WEBHOOK] Agent returned internal response: {response}")
         # --- [END OF FIX] ---
         
-        return jsonify({"success": True, "response": response})
+        return jsonify({"success": True, "response_from_agent": response})
 
     except Exception as e:
         print(f"An unexpected error occurred in webhook: {str(e)}")
         traceback.print_exc()
-        return jsonify({"error": f"An internal server error occurred: {str(e)}"}), 500
-
-@app.route('/health', methods=['GET'])
+        return jsonify({"error": f"An internal server error occurred: {str(e)}"}), 500@app.route('/health', methods=['GET'])
 def health_check():
     """Simple health check endpoint."""
     if multi_agent_system:
