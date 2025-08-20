@@ -3,7 +3,7 @@
 # UPDATED VERSION with new process method signature for AI routing
 
 import os
-from ..agent_tools_mixin import AgentToolsMixin
+from src.multi_agent_system.agent_tools_mixin import AgentToolsMixin
 
 class BaseAgent(AgentToolsMixin):
     """Base agent class with common functionality for all agents."""
