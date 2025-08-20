@@ -15,6 +15,7 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..
 if project_root not in sys.path:
     sys.path.append(project_root)
 from enhanced_tools import tool_registry
+import enhanced_ai_tools
 # --- [END OF FIX] ---
 
 from .agents import (
