@@ -25,7 +25,7 @@ try:
         raise ValueError("One or more critical environment variables (GEMINI, SUPABASE) are missing.")
 
     genai.configure(api_key=config.GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-2.5-flash-lite')
+    model = genai.GenerativeModel('gemini-2.5-flash')
     supabase: Client = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
 
 except Exception as e:
