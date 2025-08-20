@@ -45,6 +45,7 @@ RULES:
 2. Confidence must be 0.6 to 1.0 (be confident!)
 3. Make smart assumptions about missing details
 4. You can pick multiple agents if needed
+5, Reminder is always with creation of task if the task didnt exist
 
 Respond ONLY with this JSON format:
 {{
