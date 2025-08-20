@@ -33,7 +33,7 @@ try:
 
     print("[APP.PY] Initializing Google Generative AI...")
     genai.configure(api_key=config.GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash-latest')
+    model = genai.GenerativeModel('gemini-2.5-flash')
 
     print("[APP.PY] Initializing Supabase client...")
     supabase: Client = create_client(config.SUPABASE_URL, config.SUPABASE_SERVICE_KEY)
