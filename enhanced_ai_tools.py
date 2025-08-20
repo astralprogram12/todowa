@@ -1,0 +1,522 @@
+import os
+import json
+import logging
+from typing import Dict, List, Any, Optional, Union
+from datetime import datetime, timedelta
+from croniter import croniter
+from enhanced_tools import tool, tool_registry
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+class AIToolsError(Exception):
+    """Custom exception for AI Tools operations"""
+    pass
+
+# ==================== TASK MANAGEMENT ====================
+
+@tool(name="create_task", description="Create a new task", category="tasks", auto_inject=["supabase", "user_id"])
+def create_task(title: str, description: str = "", priority: str = "medium", 
+               due_date: str = None, category: str = "general", 
+               supabase=None, user_id: str = None) -> Dict[str, Any]:
+    """
+    Create a new task with comprehensive details
+    
+    Args:
+        title: Task title (required)
+        description: Detailed description 
+        priority: low, medium, high, urgent
+        due_date: ISO format date string (YYYY-MM-DD)
+        category: Task category for organization
+        supabase: Auto-injected Supabase client
+        user_id: Auto-injected user identifier
+    
+    Returns:
+        Dict containing the created task data
+    """
+    try:
+        if not supabase:
+            raise AIToolsError("Database connection not available")
+        
+        # Auto-categorize based on keywords if category is 'general'
+        if category == "general":
+            category = _auto_categorize_task(title, description)
+        
+        task_data = {
+            "user_id": user_id,
+            "title": title,
+            "description": description,
+            "priority": priority,
+            "status": "pending",
+            "category": category,
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat()
+        }
+        
+        if due_date:
+            task_data["due_date"] = due_date
+        
+        result = supabase.table("tasks").insert(task_data).execute()
+        
+        if result.data:
+            logger.info(f"Task created: {title} (ID: {result.data[0]['id']})")
+            return {"success": True, "data": result.data[0]}
+        else:
+            raise AIToolsError("Failed to create task")
+            
+    except Exception as e:
+        logger.error(f"Error creating task: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+@tool(name="get_tasks", description="Retrieve tasks with filtering options", category="tasks", auto_inject=["supabase", "user_id"])
+def get_tasks(status: str = None, priority: str = None, category: str = None,
+             due_before: str = None, limit: int = 50,
+             supabase=None, user_id: str = None) -> Dict[str, Any]:
+    """
+    Retrieve tasks with comprehensive filtering
+    
+    Args:
+        status: Filter by status (pending, in_progress, completed, cancelled)
+        priority: Filter by priority (low, medium, high, urgent)
+        category: Filter by category
+        due_before: Filter tasks due before this date (ISO format)
+        limit: Maximum number of tasks to return
+        supabase: Auto-injected Supabase client
+        user_id: Auto-injected user identifier
+    
+    Returns:
+        Dict containing the filtered tasks
+    """
+    try:
+        if not supabase:
+            raise AIToolsError("Database connection not available")
+        
+        query = supabase.table("tasks").select("*").eq("user_id", user_id)
+        
+        if status:
+            query = query.eq("status", status)
+        if priority:
+            query = query.eq("priority", priority)
+        if category:
+            query = query.eq("category", category)
+        if due_before:
+            query = query.lt("due_date", due_before)
+            
+        query = query.order("created_at", desc=True).limit(limit)
+        result = query.execute()
+        
+        logger.info(f"Retrieved {len(result.data)} tasks")
+        return {"success": True, "data": result.data, "count": len(result.data)}
+        
+    except Exception as e:
+        logger.error(f"Error retrieving tasks: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+@tool(name="update_task", description="Update an existing task", category="tasks", auto_inject=["supabase", "user_id"])
+def update_task(task_id: int, title: str = None, description: str = None,
+               status: str = None, priority: str = None, due_date: str = None,
+               category: str = None, supabase=None, user_id: str = None) -> Dict[str, Any]:
+    """
+    Update an existing task with new information
+    
+    Args:
+        task_id: ID of the task to update
+        title: New title (optional)
+        description: New description (optional)
+        status: New status (pending, in_progress, completed, cancelled)
+        priority: New priority (low, medium, high, urgent)
+        due_date: New due date (ISO format)
+        category: New category
+        supabase: Auto-injected Supabase client
+        user_id: Auto-injected user identifier
+    
+    Returns:
+        Dict containing the updated task data
+    """
+    try:
+        if not supabase:
+            raise AIToolsError("Database connection not available")
+        
+        update_data = {"updated_at": datetime.now().isoformat()}
+        
+        if title is not None:
+            update_data["title"] = title
+        if description is not None:
+            update_data["description"] = description
+        if status is not None:
+            update_data["status"] = status
+        if priority is not None:
+            update_data["priority"] = priority
+        if due_date is not None:
+            update_data["due_date"] = due_date
+        if category is not None:
+            update_data["category"] = category
+        
+        result = supabase.table("tasks").update(update_data).eq("id", task_id).eq("user_id", user_id).execute()
+        
+        if result.data:
+            logger.info(f"Task updated: {task_id}")
+            return {"success": True, "data": result.data[0]}
+        else:
+            raise AIToolsError(f"Task {task_id} not found or access denied")
+            
+    except Exception as e:
+        logger.error(f"Error updating task {task_id}: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+@tool(name="delete_task", description="Delete a task", category="tasks", auto_inject=["supabase", "user_id"])
+def delete_task(task_id: int, supabase=None, user_id: str = None) -> Dict[str, Any]:
+    """
+    Delete a task permanently
+    
+    Args:
+        task_id: ID of the task to delete
+        supabase: Auto-injected Supabase client
+        user_id: Auto-injected user identifier
+    
+    Returns:
+        Dict indicating success or failure
+    """
+    try:
+        if not supabase:
+            raise AIToolsError("Database connection not available")
+        
+        result = supabase.table("tasks").delete().eq("id", task_id).eq("user_id", user_id).execute()
+        
+        if result.data:
+            logger.info(f"Task deleted: {task_id}")
+            return {"success": True, "message": f"Task {task_id} deleted successfully"}
+        else:
+            raise AIToolsError(f"Task {task_id} not found or access denied")
+            
+    except Exception as e:
+        logger.error(f"Error deleting task {task_id}: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+# ==================== REMINDER MANAGEMENT ====================
+
+@tool(name="create_reminder", description="Create a reminder for a task or standalone", category="reminders", auto_inject=["supabase", "user_id"])
+def create_reminder(title: str, remind_at: str, description: str = "",
+                   task_id: int = None, supabase=None, user_id: str = None) -> Dict[str, Any]:
+    """
+    Create a reminder with smart task creation
+    
+    Args:
+        title: Reminder title
+        remind_at: When to remind (ISO format datetime)
+        description: Additional details
+        task_id: Link to existing task (optional)
+        supabase: Auto-injected Supabase client
+        user_id: Auto-injected user identifier
+    
+    Returns:
+        Dict containing the created reminder data
+    """
+    try:
+        if not supabase:
+            raise AIToolsError("Database connection not available")
+        
+        # Smart feature: if no task_id provided, create a task automatically
+        if task_id is None:
+            task_result = create_task(
+                title=title, 
+                description=description or f"Auto-created for reminder: {title}",
+                supabase=supabase,
+                user_id=user_id
+            )
+            if task_result["success"]:
+                task_id = task_result["data"]["id"]
+            else:
+                raise AIToolsError("Failed to create associated task")
+        
+        reminder_data = {
+            "user_id": user_id,
+            "task_id": task_id,
+            "title": title,
+            "description": description,
+            "remind_at": remind_at,
+            "is_sent": False,
+            "created_at": datetime.now().isoformat()
+        }
+        
+        result = supabase.table("reminders").insert(reminder_data).execute()
+        
+        if result.data:
+            logger.info(f"Reminder created: {title} for {remind_at}")
+            return {"success": True, "data": result.data[0]}
+        else:
+            raise AIToolsError("Failed to create reminder")
+            
+    except Exception as e:
+        logger.error(f"Error creating reminder: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+@tool(name="get_reminders", description="Get reminders with filtering", category="reminders", auto_inject=["supabase", "user_id"])
+def get_reminders(is_sent: bool = None, task_id: int = None, 
+                 remind_before: str = None, limit: int = 50,
+                 supabase=None, user_id: str = None) -> Dict[str, Any]:
+    """
+    Retrieve reminders with filtering options
+    
+    Args:
+        is_sent: Filter by sent status
+        task_id: Filter by specific task
+        remind_before: Filter reminders due before this datetime
+        limit: Maximum number of reminders to return
+        supabase: Auto-injected Supabase client
+        user_id: Auto-injected user identifier
+    
+    Returns:
+        Dict containing the filtered reminders
+    """
+    try:
+        if not supabase:
+            raise AIToolsError("Database connection not available")
+        
+        query = supabase.table("reminders").select("*, tasks(*)").eq("user_id", user_id)
+        
+        if is_sent is not None:
+            query = query.eq("is_sent", is_sent)
+        if task_id is not None:
+            query = query.eq("task_id", task_id)
+        if remind_before:
+            query = query.lt("remind_at", remind_before)
+            
+        query = query.order("remind_at", desc=False).limit(limit)
+        result = query.execute()
+        
+        logger.info(f"Retrieved {len(result.data)} reminders")
+        return {"success": True, "data": result.data, "count": len(result.data)}
+        
+    except Exception as e:
+        logger.error(f"Error retrieving reminders: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+# ==================== CATEGORY MANAGEMENT ====================
+
+@tool(name="create_category", description="Create a new category", category="categories", auto_inject=["supabase", "user_id"])
+def create_category(name: str, description: str = "", color: str = "#3B82F6",
+                   supabase=None, user_id: str = None) -> Dict[str, Any]:
+    """
+    Create a new category for organizing tasks
+    
+    Args:
+        name: Category name
+        description: Category description
+        color: Hex color code for the category
+        supabase: Auto-injected Supabase client
+        user_id: Auto-injected user identifier
+    
+    Returns:
+        Dict containing the created category data
+    """
+    try:
+        if not supabase:
+            raise AIToolsError("Database connection not available")
+        
+        category_data = {
+            "user_id": user_id,
+            "name": name,
+            "description": description,
+            "color": color,
+            "created_at": datetime.now().isoformat()
+        }
+        
+        result = supabase.table("categories").insert(category_data).execute()
+        
+        if result.data:
+            logger.info(f"Category created: {name}")
+            return {"success": True, "data": result.data[0]}
+        else:
+            raise AIToolsError("Failed to create category")
+            
+    except Exception as e:
+        logger.error(f"Error creating category: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+@tool(name="get_categories", description="Get all categories", category="categories", auto_inject=["supabase", "user_id"])
+def get_categories(supabase=None, user_id: str = None) -> Dict[str, Any]:
+    """
+    Retrieve all categories for the user
+    
+    Args:
+        supabase: Auto-injected Supabase client
+        user_id: Auto-injected user identifier
+    
+    Returns:
+        Dict containing all categories
+    """
+    try:
+        if not supabase:
+            raise AIToolsError("Database connection not available")
+        
+        result = supabase.table("categories").select("*").eq("user_id", user_id).order("name").execute()
+        
+        logger.info(f"Retrieved {len(result.data)} categories")
+        return {"success": True, "data": result.data, "count": len(result.data)}
+        
+    except Exception as e:
+        logger.error(f"Error retrieving categories: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+# ==================== ANALYTICS & REPORTING ====================
+
+@tool(name="get_task_analytics", description="Get comprehensive task analytics", category="analytics", auto_inject=["supabase", "user_id"])
+def get_task_analytics(days: int = 30, supabase=None, user_id: str = None) -> Dict[str, Any]:
+    """
+    Generate comprehensive task analytics
+    
+    Args:
+        days: Number of days to analyze (default: 30)
+        supabase: Auto-injected Supabase client
+        user_id: Auto-injected user identifier
+    
+    Returns:
+        Dict containing detailed analytics
+    """
+    try:
+        if not supabase:
+            raise AIToolsError("Database connection not available")
+        
+        # Date range for analysis
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days)
+        
+        # Get all tasks in the date range
+        tasks_result = supabase.table("tasks").select("*").eq("user_id", user_id)\
+            .gte("created_at", start_date.isoformat()).execute()
+        
+        tasks = tasks_result.data
+        
+        # Calculate analytics
+        total_tasks = len(tasks)
+        completed_tasks = len([t for t in tasks if t.get("status") == "completed"])
+        pending_tasks = len([t for t in tasks if t.get("status") == "pending"])
+        in_progress_tasks = len([t for t in tasks if t.get("status") == "in_progress"])
+        
+        # Priority distribution
+        priority_dist = {}
+        for task in tasks:
+            priority = task.get("priority", "medium")
+            priority_dist[priority] = priority_dist.get(priority, 0) + 1
+        
+        # Category distribution
+        category_dist = {}
+        for task in tasks:
+            category = task.get("category", "general")
+            category_dist[category] = category_dist.get(category, 0) + 1
+        
+        completion_rate = (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
+        
+        analytics = {
+            "period": f"{days} days",
+            "total_tasks": total_tasks,
+            "completed_tasks": completed_tasks,
+            "pending_tasks": pending_tasks,
+            "in_progress_tasks": in_progress_tasks,
+            "completion_rate": round(completion_rate, 2),
+            "priority_distribution": priority_dist,
+            "category_distribution": category_dist,
+            "generated_at": datetime.now().isoformat()
+        }
+        
+        logger.info(f"Generated analytics for {days} days: {total_tasks} tasks, {completion_rate:.1f}% completion rate")
+        return {"success": True, "data": analytics}
+        
+    except Exception as e:
+        logger.error(f"Error generating analytics: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+# ==================== UTILITY FUNCTIONS ====================
+
+def _auto_categorize_task(title: str, description: str) -> str:
+    """
+    Automatically categorize a task based on keywords in title and description
+    """
+    content = (title + " " + description).lower()
+    
+    # Define category keywords
+    categories = {
+        "work": ["meeting", "project", "deadline", "report", "presentation", "client", "team", "office"],
+        "personal": ["shopping", "grocery", "family", "friend", "birthday", "anniversary", "vacation"],
+        "health": ["doctor", "appointment", "exercise", "gym", "medication", "checkup", "health"],
+        "finance": ["bank", "payment", "bill", "tax", "budget", "money", "invoice", "insurance"],
+        "home": ["clean", "repair", "maintenance", "garden", "organize", "decorate"],
+        "learning": ["study", "course", "book", "tutorial", "lesson", "practice", "exam"]
+    }
+    
+    for category, keywords in categories.items():
+        if any(keyword in content for keyword in keywords):
+            return category
+    
+    return "general"
+
+@tool(name="validate_cron_expression", description="Validate a cron expression", category="utilities")
+def validate_cron_expression(cron_expr: str) -> Dict[str, Any]:
+    """
+    Validate a cron expression and provide next execution times
+    
+    Args:
+        cron_expr: Cron expression to validate (e.g., "0 9 * * MON-FRI")
+    
+    Returns:
+        Dict containing validation result and next execution times
+    """
+    try:
+        cron = croniter(cron_expr, datetime.now())
+        
+        # Get next 5 execution times
+        next_times = []
+        for i in range(5):
+            next_times.append(cron.get_next(datetime).isoformat())
+        
+        return {
+            "success": True, 
+            "valid": True,
+            "next_executions": next_times,
+            "message": "Cron expression is valid"
+        }
+        
+    except Exception as e:
+        return {
+            "success": True,
+            "valid": False,
+            "error": str(e),
+            "message": "Invalid cron expression"
+        }
+
+# ==================== TOOL REGISTRY SETUP ====================
+
+def initialize_ai_tools():
+    """
+    Initialize the AI tools system with dependency injection context
+    """
+    logger.info("AI Tools system initialized with enhanced features")
+    logger.info(f"Total registered tools: {len(tool_registry.tools)}")
+    
+    # Log categories
+    categories = {}
+    for name, metadata in tool_registry.tool_metadata.items():
+        cat = metadata['category']
+        categories[cat] = categories.get(cat, 0) + 1
+    
+    logger.info(f"Tool categories: {categories}")
+    
+def set_context(supabase_client, user_id: str):
+    """
+    Set the dependency injection context for auto-parameter injection
+    
+    Args:
+        supabase_client: Supabase client instance
+        user_id: Current user identifier
+    """
+    tool_registry.set_injection_context({
+        "supabase": supabase_client,
+        "user_id": user_id
+    })
+    logger.info(f"Context set for user: {user_id}")
+
+# Initialize the system when module is imported
+if __name__ != "__main__":
+    initialize_ai_tools()
