@@ -1,46 +1,5 @@
 # tool_collections/__init__.py
-# Initialize and register all tool collections
+# This file now simply imports the new toolset,
+# allowing the @tool decorators to register themselves.
 
-import inspect
-
-# --- [THE FIX] ---
-# Import the SINGLE, UNIFIED tool_registry from the correct file in the project's root directory.
-# This also requires adding the root path to sys.path so the import can be found.
-import sys
-import os
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-if project_root not in sys.path:
-    sys.path.append(project_root)
-
-from enhanced_tools import tool_registry
-# --- [END OF FIX] ---
-
-
-# This function registers your new, enhanced AI tools.
-def register_tools():
-    """Register additional tools from external modules."""
-    try:
-        # Import your new, primary toolset
-        # Make sure this filename matches your actual tools file (e.g., 'enhanced_ai_tools')
-        import enhanced_ai_tools
-        
-        # Register AI tools with the unified tool registry
-        for attr_name in dir(enhanced_ai_tools):
-            obj = getattr(enhanced_ai_tools, attr_name)
-            
-            # Use inspect.isfunction() to ensure we only register actual functions.
-            if not attr_name.startswith('_') and inspect.isfunction(obj):
-                
-                print(f"Registering discovered tool: {attr_name}")
-                tool_registry.register_tool(
-                    name=attr_name,
-                    func=obj,
-                    category='ai_tools',
-                    description=getattr(obj, '__doc__', f"AI tool: {attr_name}")
-                )
-
-    except ImportError:
-        print("Could not import enhanced_ai_tools module for tool registration")
-    
-# Run the registration when the module is imported
-register_tools()
+import enhanced_ai_tools
