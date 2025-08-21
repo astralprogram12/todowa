@@ -54,7 +54,11 @@ class BaseAgent(EnhancedAgentToolsMixin):
                    action_details=None, success_status=True, error_details=None):
         """Log an action performed by the agent."""
         try:
-            from database_personal import log_action # Assuming you've consolidated your DB files
+            # --- [THE FIX] ---
+            # Changed from 'database' back to the correct 'database_personal'
+            from database_personal import log_action
+            # --- [END OF FIX] ---
+            
             log_action(
                 supabase=self.supabase, user_id=user_id, action_type=action_type,
                 entity_type=entity_type, entity_id=entity_id, action_details=action_details or {},
@@ -62,5 +66,4 @@ class BaseAgent(EnhancedAgentToolsMixin):
             )
         except Exception as e:
             print(f"!!! AGENT LOGGING ERROR: {e}")
-
     # ... other helper methods in your base agent ...
