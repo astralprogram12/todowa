@@ -471,6 +471,395 @@ def get_task_analytics(days: int = 30, supabase=None, user_id: str = None) -> Di
         logger.error(f"Error generating analytics: {str(e)}")
         return {"success": False, "error": str(e)}
 
+# ==================== V4.0 JOURNAL MANAGEMENT ====================
+
+@tool(name="create_journal_entry", description="Create a new journal entry with mood tracking", category="journal", auto_inject=["supabase", "user_id"])
+def create_journal_entry(title: str, content: str, mood_score: float = None, 
+                        emotional_tone: str = "neutral", themes: str = None,
+                        entry_type: str = "free_form", supabase=None, user_id: str = None) -> Dict[str, Any]:
+    """
+    Create a new journal entry with v4.0 enhanced features
+    
+    Args:
+        title: Journal entry title
+        content: Journal entry content
+        mood_score: Mood score from 1.0 to 10.0
+        emotional_tone: Emotional tone (very_positive, positive, neutral, negative, very_negative, mixed)
+        themes: Comma-separated themes (will be converted to list)
+        entry_type: Entry type (free_form, structured, prompted)
+        supabase: Auto-injected Supabase client
+        user_id: Auto-injected user identifier
+    
+    Returns:
+        Dict containing the created journal entry
+    """
+    try:
+        if not supabase:
+            raise AIToolsError("Database connection not available")
+        
+        # Import database functions
+        from database_personal import add_journal_entry
+        
+        # Convert themes string to list
+        themes_list = [theme.strip() for theme in themes.split(",")] if themes else None
+        
+        result = add_journal_entry(
+            supabase=supabase,
+            user_id=user_id,
+            title=title,
+            content=content,
+            mood_score=mood_score,
+            emotional_tone=emotional_tone,
+            themes=themes_list,
+            entry_type=entry_type
+        )
+        
+        logger.info(f"Journal entry created: {title}")
+        return {"success": True, "data": result}
+        
+    except Exception as e:
+        logger.error(f"Error creating journal entry: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+@tool(name="get_journal_entries", description="Retrieve journal entries with filtering", category="journal", auto_inject=["supabase", "user_id"])
+def get_journal_entries(title_like: str = None, content_like: str = None,
+                       emotional_tone: str = None, mood_min: float = None, 
+                       mood_max: float = None, date_from: str = None, 
+                       date_to: str = None, limit: int = 20,
+                       supabase=None, user_id: str = None) -> Dict[str, Any]:
+    """
+    Retrieve journal entries with comprehensive filtering
+    
+    Args:
+        title_like: Filter by title containing this text
+        content_like: Filter by content containing this text
+        emotional_tone: Filter by emotional tone
+        mood_min: Minimum mood score filter
+        mood_max: Maximum mood score filter
+        date_from: Filter entries from this date (ISO format)
+        date_to: Filter entries to this date (ISO format)
+        limit: Maximum number of entries to return
+        supabase: Auto-injected Supabase client
+        user_id: Auto-injected user identifier
+    
+    Returns:
+        Dict containing the filtered journal entries
+    """
+    try:
+        if not supabase:
+            raise AIToolsError("Database connection not available")
+        
+        from database_personal import query_journal_entries
+        
+        filters = {}
+        if title_like: filters['title_like'] = title_like
+        if content_like: filters['content_like'] = content_like
+        if emotional_tone: filters['emotional_tone'] = emotional_tone
+        if mood_min: filters['mood_min'] = mood_min
+        if mood_max: filters['mood_max'] = mood_max
+        if date_from: filters['date_from'] = date_from
+        if date_to: filters['date_to'] = date_to
+        if limit: filters['limit'] = limit
+        
+        result = query_journal_entries(
+            supabase=supabase,
+            user_id=user_id,
+            **filters
+        )
+        
+        logger.info(f"Retrieved {len(result)} journal entries")
+        return {"success": True, "data": result, "count": len(result)}
+        
+    except Exception as e:
+        logger.error(f"Error retrieving journal entries: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+@tool(name="analyze_mood_patterns", description="Analyze mood patterns from journal entries", category="journal", auto_inject=["supabase", "user_id"])
+def analyze_mood_patterns(days: int = 30, supabase=None, user_id: str = None) -> Dict[str, Any]:
+    """
+    Analyze mood patterns from journal entries over a specified period
+    
+    Args:
+        days: Number of days to analyze (default: 30)
+        supabase: Auto-injected Supabase client
+        user_id: Auto-injected user identifier
+    
+    Returns:
+        Dict containing mood pattern analysis
+    """
+    try:
+        if not supabase:
+            raise AIToolsError("Database connection not available")
+        
+        from database_personal import analyze_mood_patterns
+        
+        result = analyze_mood_patterns(
+            supabase=supabase,
+            user_id=user_id,
+            days=days
+        )
+        
+        logger.info(f"Analyzed mood patterns for {days} days")
+        return {"success": True, "data": result}
+        
+    except Exception as e:
+        logger.error(f"Error analyzing mood patterns: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+# ==================== V4.0 MEMORY MANAGEMENT ====================
+
+@tool(name="create_memory", description="Create a new memory entry", category="memory", auto_inject=["supabase", "user_id"])
+def create_memory(title: str, content: str, memory_type: str = "general",
+                 importance_score: float = 0.5, emotional_tone: str = "neutral",
+                 tags: str = None, relationships: str = None, locations: str = None,
+                 supabase=None, user_id: str = None) -> Dict[str, Any]:
+    """
+    Create a new memory entry with v4.0 enhanced features
+    
+    Args:
+        title: Memory title
+        content: Memory content
+        memory_type: Type of memory (milestone, achievement, relationship, experience, learning, general)
+        importance_score: Importance score from 0.0 to 1.0
+        emotional_tone: Emotional tone (positive, negative, neutral, mixed)
+        tags: Comma-separated tags (will be converted to list)
+        relationships: Comma-separated people involved (will be converted to list)
+        locations: Comma-separated locations (will be converted to list)
+        supabase: Auto-injected Supabase client
+        user_id: Auto-injected user identifier
+    
+    Returns:
+        Dict containing the created memory
+    """
+    try:
+        if not supabase:
+            raise AIToolsError("Database connection not available")
+        
+        from database_personal import add_memory_entry
+        
+        # Convert comma-separated strings to lists
+        tags_list = [tag.strip() for tag in tags.split(",")] if tags else None
+        relationships_list = [rel.strip() for rel in relationships.split(",")] if relationships else None
+        locations_list = [loc.strip() for loc in locations.split(",")] if locations else None
+        
+        result = add_memory_entry(
+            supabase=supabase,
+            user_id=user_id,
+            title=title,
+            content=content,
+            memory_type=memory_type,
+            importance_score=importance_score,
+            emotional_tone=emotional_tone,
+            tags=tags_list,
+            relationships=relationships_list,
+            locations=locations_list
+        )
+        
+        logger.info(f"Memory created: {title}")
+        return {"success": True, "data": result}
+        
+    except Exception as e:
+        logger.error(f"Error creating memory: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+@tool(name="search_memories", description="Search memories with intelligent filtering", category="memory", auto_inject=["supabase", "user_id"])
+def search_memories(query: str, limit: int = 10, supabase=None, user_id: str = None) -> Dict[str, Any]:
+    """
+    Search memories using text matching with importance-based ranking
+    
+    Args:
+        query: Search query text
+        limit: Maximum number of memories to return
+        supabase: Auto-injected Supabase client
+        user_id: Auto-injected user identifier
+    
+    Returns:
+        Dict containing the matching memories
+    """
+    try:
+        if not supabase:
+            raise AIToolsError("Database connection not available")
+        
+        from database_personal import search_memories
+        
+        result = search_memories(
+            supabase=supabase,
+            user_id=user_id,
+            query=query,
+            limit=limit
+        )
+        
+        logger.info(f"Found {len(result)} memories for query: {query}")
+        return {"success": True, "data": result, "count": len(result)}
+        
+    except Exception as e:
+        logger.error(f"Error searching memories: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+@tool(name="get_memory_timeline", description="Get memories organized chronologically", category="memory", auto_inject=["supabase", "user_id"])
+def get_memory_timeline(memory_type: str = None, importance_min: float = None,
+                       emotional_tone: str = None, date_from: str = None,
+                       date_to: str = None, limit: int = 50,
+                       supabase=None, user_id: str = None) -> Dict[str, Any]:
+    """
+    Get memories organized in chronological timeline format
+    
+    Args:
+        memory_type: Filter by memory type
+        importance_min: Minimum importance score filter
+        emotional_tone: Filter by emotional tone
+        date_from: Filter memories from this date
+        date_to: Filter memories to this date
+        limit: Maximum number of memories to return
+        supabase: Auto-injected Supabase client
+        user_id: Auto-injected user identifier
+    
+    Returns:
+        Dict containing the chronologically ordered memories
+    """
+    try:
+        if not supabase:
+            raise AIToolsError("Database connection not available")
+        
+        from database_personal import get_memory_timeline
+        
+        filters = {}
+        if memory_type: filters['memory_type'] = memory_type
+        if importance_min: filters['importance_min'] = importance_min
+        if emotional_tone: filters['emotional_tone'] = emotional_tone
+        if date_from: filters['date_from'] = date_from
+        if date_to: filters['date_to'] = date_to
+        if limit: filters['limit'] = limit
+        
+        result = get_memory_timeline(
+            supabase=supabase,
+            user_id=user_id,
+            **filters
+        )
+        
+        logger.info(f"Retrieved {len(result)} memories in timeline format")
+        return {"success": True, "data": result, "count": len(result)}
+        
+    except Exception as e:
+        logger.error(f"Error getting memory timeline: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+@tool(name="analyze_memory_relationships", description="Analyze relationships mentioned in memories", category="memory", auto_inject=["supabase", "user_id"])
+def analyze_memory_relationships(supabase=None, user_id: str = None) -> Dict[str, Any]:
+    """
+    Analyze relationships and people mentioned across memories
+    
+    Args:
+        supabase: Auto-injected Supabase client
+        user_id: Auto-injected user identifier
+    
+    Returns:
+        Dict containing relationship analysis data
+    """
+    try:
+        if not supabase:
+            raise AIToolsError("Database connection not available")
+        
+        from database_personal import analyze_memory_relationships
+        
+        result = analyze_memory_relationships(
+            supabase=supabase,
+            user_id=user_id
+        )
+        
+        logger.info("Completed memory relationship analysis")
+        return {"success": True, "data": result}
+        
+    except Exception as e:
+        logger.error(f"Error analyzing memory relationships: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+# ==================== V4.0 CONTENT CLASSIFICATION ====================
+
+@tool(name="classify_content", description="Classify content using AI analysis", category="classification", auto_inject=["supabase", "user_id"])
+def classify_content(content_text: str, detected_language: str = "en", 
+                   original_text: str = None, supabase=None, user_id: str = None) -> Dict[str, Any]:
+    """
+    Classify content automatically using AI-powered analysis
+    
+    Args:
+        content_text: The text content to classify
+        detected_language: The detected language of the content
+        original_text: Original text before translation (if applicable)
+        supabase: Auto-injected Supabase client
+        user_id: Auto-injected user identifier
+    
+    Returns:
+        Dict containing the classification results
+    """
+    try:
+        if not supabase:
+            raise AIToolsError("Database connection not available")
+        
+        from database_personal import classify_and_store_content
+        
+        result = classify_and_store_content(
+            supabase=supabase,
+            user_id=user_id,
+            content_text=content_text,
+            detected_language=detected_language,
+            original_text=original_text
+        )
+        
+        logger.info(f"Content classified as: {result.get('primary_category')}")
+        return {"success": True, "data": result}
+        
+    except Exception as e:
+        logger.error(f"Error classifying content: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+@tool(name="get_classification_history", description="Get content classification history", category="classification", auto_inject=["supabase", "user_id"])
+def get_classification_history(primary_category: str = None, emotional_tone: str = None,
+                             date_from: str = None, date_to: str = None, 
+                             limit: int = 50, supabase=None, user_id: str = None) -> Dict[str, Any]:
+    """
+    Get historical content classification results with filtering
+    
+    Args:
+        primary_category: Filter by primary category (JOURNAL_ENTRY, MEMORY, TEMPORARY_INFO, KNOWLEDGE)
+        emotional_tone: Filter by emotional tone
+        date_from: Filter classifications from this date
+        date_to: Filter classifications to this date
+        limit: Maximum number of classifications to return
+        supabase: Auto-injected Supabase client
+        user_id: Auto-injected user identifier
+    
+    Returns:
+        Dict containing the classification history
+    """
+    try:
+        if not supabase:
+            raise AIToolsError("Database connection not available")
+        
+        from database_personal import get_classification_history
+        
+        filters = {}
+        if primary_category: filters['primary_category'] = primary_category
+        if emotional_tone: filters['emotional_tone'] = emotional_tone
+        if date_from: filters['date_from'] = date_from
+        if date_to: filters['date_to'] = date_to
+        if limit: filters['limit'] = limit
+        
+        result = get_classification_history(
+            supabase=supabase,
+            user_id=user_id,
+            **filters
+        )
+        
+        logger.info(f"Retrieved {len(result)} classification records")
+        return {"success": True, "data": result, "count": len(result)}
+        
+    except Exception as e:
+        logger.error(f"Error retrieving classification history: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+
+
 # ==================== UTILITY FUNCTIONS ====================
 
 def _auto_categorize_task(title: str, description: str) -> str:

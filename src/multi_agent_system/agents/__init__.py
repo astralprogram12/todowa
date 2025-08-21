@@ -17,6 +17,7 @@ from .preference_agent import PreferenceAgent
 from .silent_agent import SilentAgent
 from .action_agent import ActionAgent
 from .intent_classifier_agent import IntentClassifierAgent
+from .enhanced_double_check_agent import EnhancedDoubleCheckAgent
 
 __all__ = [
     'BaseAgent',
@@ -34,5 +35,6 @@ __all__ = [
     'PreferenceAgent',
     'SilentAgent',
     'ActionAgent',
-    'IntentClassifierAgent'
+    'IntentClassifierAgent',
+    'EnhancedDoubleCheckAgent'
 ]

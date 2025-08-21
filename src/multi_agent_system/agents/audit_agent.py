@@ -1,15 +1,33 @@
 from .base_agent import BaseAgent
 import database_personal as database
 import os
-import re
-from datetime import datetime, timedelta, timezone
+import logging
+from typing import Dict, Any, Optional
+from datetime import datetime, timezone
+
+# Import the Enhanced Double-Check Agent
+try:
+    from .enhanced_double_check_agent import get_enhanced_double_check_agent, validate_agent_response
+except ImportError as e:
+    logging.warning(f"Enhanced Double-Check Agent not available: {e}")
+    get_enhanced_double_check_agent = None
+    validate_agent_response = None
+
+logger = logging.getLogger(__name__)
 
 class AuditAgent(BaseAgent):
-    """Enhanced Audit Agent for version 3.5 that verifies truth in responses and confirms ambiguous inputs."""
+    """Enhanced audit agent with integrated double-check validation system."""
     
     def __init__(self, supabase, ai_model):
         super().__init__(supabase, ai_model, agent_name="AuditAgent")
         self.comprehensive_prompts = {}
+        self.double_check_enabled = True
+        self.validation_stats = {
+            'total_responses': 0,
+            'validated_responses': 0,
+            'issues_found': 0,
+            'corrections_made': 0
+        }
 
     def load_comprehensive_prompts(self):
         try:
@@ -43,192 +61,164 @@ CRITICAL: Provide audit information naturally. Never include:
 - JSON, debugging info, or technical formatting
 - References to agents, databases, or system architecture
 
-You are a VERIFICATION AGENT designed to:
-1. Check responses for factual accuracy
-2. Verify that time-related information is correct (e.g., "in 5 minutes" vs "tomorrow")
-3. Ensure all claims made are true and supported
-4. Flag any potential inconsistencies or errors
-5. Extract clean task descriptions from user input
-6. Request clarification for any ambiguous inputs
-
-Respond like a professional audit consultant who prioritizes TRUTH above all else.
+Respond like a professional audit consultant.
         """
         return f"{core_identity}\n\n{audit_specialized}{leak_prevention}"
-    
-    async def extract_task_description(self, user_input):
-        """
-        Use AI to extract only the essential task description from user input.
-        For example, from "remind me to eat in 5 minutes", extract just "eat"
-        """
-        system_prompt = """You are a task extraction expert. Extract ONLY the core task from the user's input.
-        DO NOT include time expressions, prepositions, or unnecessary context.
-        Return ONLY the core task/action phrase - nothing else.
-        
-        Examples:
-        "remind me to buy groceries tomorrow" → "buy groceries"
-        "I need to call mom at 5pm" → "call mom"
-        "Please create a task to finish report by Friday" → "finish report"
-        "Add a reminder to eat in 10 minutes" → "eat"
-        """
-        
-        user_prompt = f"Extract the core task from: {user_input}"
-        
-        try:
-            response = self.ai_model.generate_content([system_prompt, user_prompt])
-            return response.text.strip()
-        except Exception as e:
-            print(f"Error extracting task: {e}")
-            # Fallback to simple extraction if AI fails
-            for phrase in ['remind me to', 'remind me about', 'set reminder for', 'reminder to', 'task to']:
-                if phrase in user_input.lower():
-                    return user_input[user_input.lower().find(phrase) + len(phrase):].strip()
-            return user_input
 
-    async def verify_time_accuracy(self, response_text, user_input):
+    async def validate_agent_response(self, original_input: str, agent_response: Dict[str, Any], 
+                                    agent_name: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
         """
-        Verify that time-related information in the response matches the user's request.
-        This specifically checks for time discrepancies like "in 5 minutes" vs "tomorrow".
-        """
-        # Enhanced time pattern recognition for abbreviations
-        time_phrases = [
-            (r'in \s*(\d+)\s*m(in(ute)?s?)?\b', 'minutes'),  # matches "in 5m", "in 5min", "in 5mins", "in 5 minutes"
-            (r'in \s*(\d+)\s*h(our)?s?\b', 'hours'),  # matches "in 2h", "in 2hr", "in 2hrs", "in 2 hours"
-            (r'in \s*(\d+)\s*d(ay)?s?\b', 'days'),  # matches "in 3d", "in 3day", "in 3days", "in 3 days"
-            (r'today at \s*(\d+)(:\d+)?\s*(am|pm)?\b', 'today'),
-            (r'tomorrow at \s*(\d+)(:\d+)?\s*(am|pm)?\b', 'tomorrow'),
-            (r'next week\b', 'next week'),
-        ]
+        Validate an agent response using the Enhanced Double-Check system.
         
-        user_time_spec = None
-        for pattern, time_type in time_phrases:
-            match = re.search(pattern, user_input.lower())
-            if match:
-                user_time_spec = (time_type, match.group(0))
-                break
-        
-        if not user_time_spec:
-            return response_text  # No time specification to verify
-        
-        # Check if response contains a different time than specified
-        incorrect_time = False
-        if user_time_spec[0] == 'minutes' and 'tomorrow' in response_text.lower():
-            incorrect_time = True
-        elif user_time_spec[0] == 'hours' and 'tomorrow' in response_text.lower():
-            incorrect_time = True
-        elif user_time_spec[0] == 'today' and 'tomorrow' in response_text.lower():
-            incorrect_time = True
+        Args:
+            original_input (str): The original user input
+            agent_response (Dict): The agent's response to validate
+            agent_name (str): Name of the agent that generated the response
+            context (Dict): Additional context for validation
             
-        if incorrect_time:
-            # Generate a corrected response
-            system_prompt = """You are a correction agent. Fix the following response to accurately reflect the time specified in the user's request.
-            DO NOT mention that you're correcting anything - simply provide the corrected response."""
-            
-            user_prompt = f"""User request: {user_input}
-            Original response: {response_text}
-            
-            The time mentioned in the response does not match what the user requested. 
-            Provide a corrected version that accurately reflects the user's requested time."""
-            
-            try:
-                correction = self.ai_model.generate_content([system_prompt, user_prompt])
-                return correction.text
-            except Exception as e:
-                print(f"Error generating time correction: {e}")
-                return response_text
-        
-        return response_text
-    
-    async def check_for_ambiguity(self, user_input):
+        Returns:
+            Dict: Validation result with potential corrections
         """
-        Check if the user input is ambiguous and needs clarification.
-        """
-        system_prompt = """You are an ambiguity detection expert. Determine if the user's input is ambiguous and requires clarification.
-        Return "YES" if clarification is needed with a specific question to ask the user.
-        Return "NO" if the input is clear.
-        
-        Examples of ambiguous inputs:
-        - "Remind me later" (When is "later"?)
-        - "Create a task for the thing" (What "thing"?)
-        - "Meeting with the team" (Which team? When?)
-        - "10m" (Is this 10 minutes or 10 meters?)
-        """
-        
-        user_prompt = f"Analyze this input for ambiguity: {user_input}"
+        if not self.double_check_enabled or validate_agent_response is None:
+            # Return original response if validation is disabled or unavailable
+            return {
+                'is_valid': True,
+                'confidence_score': 1.0,
+                'validation_issues': [],
+                'correction_suggestions': [],
+                'validated_response': agent_response
+            }
         
         try:
-            response = self.ai_model.generate_content([system_prompt, user_prompt])
-            result = response.text.strip()
+            # Update statistics
+            self.validation_stats['total_responses'] += 1
             
-            if result.startswith("YES"):
-                # Extract the clarification question
-                question = result.replace("YES", "", 1).strip()
-                return True, question
+            # Perform validation
+            validation_result = await validate_agent_response(
+                original_input, agent_response, agent_name, context, self.supabase, self.ai_model
+            )
+            
+            # Update statistics based on results
+            if validation_result.get('is_valid', True):
+                self.validation_stats['validated_responses'] += 1
             else:
-                return False, None
+                self.validation_stats['issues_found'] += 1
+                if validation_result.get('validated_response') != agent_response:
+                    self.validation_stats['corrections_made'] += 1
+            
+            # Log validation result if significant issues found
+            if not validation_result.get('is_valid', True):
+                user_id = context.get('user_id') if context else None
+                if user_id:
+                    self._log_validation_audit(
+                        user_id=user_id,
+                        agent_name=agent_name,
+                        original_input=original_input,
+                        validation_result=validation_result
+                    )
+            
+            return validation_result
+            
         except Exception as e:
-            print(f"Error checking ambiguity: {e}")
-            return False, None
+            logger.error(f"Error in response validation: {e}")
+            return {
+                'is_valid': True,  # Default to valid to avoid blocking
+                'confidence_score': 0.5,
+                'validation_issues': [f"Validation error: {str(e)}"],
+                'correction_suggestions': [],
+                'validated_response': agent_response
+            }
+    
+    def get_validation_statistics(self) -> Dict[str, Any]:
+        """Get current validation statistics."""
+        stats = self.validation_stats.copy()
+        if stats['total_responses'] > 0:
+            stats['validation_rate'] = stats['validated_responses'] / stats['total_responses']
+            stats['issue_rate'] = stats['issues_found'] / stats['total_responses']
+            stats['correction_rate'] = stats['corrections_made'] / stats['total_responses']
+        else:
+            stats['validation_rate'] = 0.0
+            stats['issue_rate'] = 0.0
+            stats['correction_rate'] = 0.0
         
+        return stats
+    
+    def _log_validation_audit(self, user_id: str, agent_name: str, original_input: str, validation_result: Dict[str, Any]):
+        """Log validation audit trail for monitoring and improvement."""
+        try:
+            validation_details = {
+                'agent_name': agent_name,
+                'original_input': original_input[:200],  # Truncate for storage
+                'is_valid': validation_result.get('is_valid', True),
+                'confidence_score': validation_result.get('confidence_score', 1.0),
+                'issues_count': len(validation_result.get('validation_issues', [])),
+                'corrections_count': len(validation_result.get('correction_suggestions', [])),
+                'validation_timestamp': datetime.now(timezone.utc).isoformat()
+            }
+            
+            self._log_action(
+                user_id=user_id,
+                action_type="response_validation",
+                entity_type="system",
+                entity_id=agent_name,
+                action_details=validation_details,
+                success_status=validation_result.get('is_valid', True),
+                error_details=validation_result.get('validation_issues') if not validation_result.get('is_valid', True) else None
+            )
+        except Exception as e:
+            logger.error(f"Error logging validation audit: {e}")
+
     async def process(self, user_input, context, routing_info=None):
         try:
+            # Check if this is a validation statistics request
+            if 'validation stat' in user_input.lower() or 'double check stat' in user_input.lower():
+                stats = self.get_validation_statistics()
+                return {
+                    "message": f"Validation Statistics:\n"
+                             f"• Total responses checked: {stats['total_responses']}\n"
+                             f"• Validation rate: {stats['validation_rate']:.1%}\n"
+                             f"• Issues detected: {stats['issues_found']} ({stats['issue_rate']:.1%})\n"
+                             f"• Corrections made: {stats['corrections_made']} ({stats['correction_rate']:.1%})"
+                }
+            
             if not self.comprehensive_prompts:
                 self.load_comprehensive_prompts()
             
             system_prompt = self.comprehensive_prompts.get('core_system', 'You are a helpful audit assistant.')
             
-            # First, check for ambiguity in the input
-            is_ambiguous, clarification_question = await self.check_for_ambiguity(user_input)
-            
-            if is_ambiguous and clarification_question:
-                return {
-                    "message": clarification_question,
-                    "status": "needs_clarification"
-                }
-            
-            # If it's a reminder, extract the core task
-            if 'remind' in user_input.lower() or 'reminder' in user_input.lower() or 'task' in user_input.lower():
-                # Extract the core task from the user input
-                task_description = await self.extract_task_description(user_input)
-                
-                # Determine if this is an important task that needs follow-up
-                task_importance_system = """You are a task importance analyzer. Determine if the given task is important enough to offer additional assistance.
-                Rate the task from 1-5, where 1 is routine (eating, drinking water) and 5 is critical (urgent meeting, important deadline).
-                Return ONLY the number."""
-                
-                task_importance_prompt = f"Rate the importance of this task: {task_description}"
-                
-                try:
-                    importance_response = self.ai_model.generate_content([task_importance_system, task_importance_prompt])
-                    importance_rating = int(importance_response.text.strip())
-                except:
-                    importance_rating = 3  # Default to medium importance
-                
-                # For important tasks (4-5), provide a different response style
-                if importance_rating >= 4:
-                    response_text = f"I've added '{task_description}' to your tasks. Would you like me to help you prepare for this or provide any additional reminders?"
-                else:
-                    # For routine tasks, keep it simple
-                    response_text = f"Got it! I've added '{task_description}' to your tasks."
-                
-                clean_message = response_text
-            else:
-                user_prompt = f"""
+            user_prompt = f"""
 User has an audit-related question: {user_input}
 
 Provide helpful audit-related information. Be professional and thorough.
 Do not include any technical details or system information.
+
+If they ask about validation or double-checking, explain that the system has:
+- Enhanced validation for response accuracy
+- Multilingual verification capabilities
+- Time parsing validation
+- Intent alignment checking
+- Logic consistency monitoring
+
+Keep explanations user-friendly and avoid technical details.
 """
-                
-                # Make AI call (synchronous)
-                response = self.ai_model.generate_content([system_prompt, user_prompt])
-                response_text = response.text
-                
-                # Clean the response to prevent leaks
-                clean_message = self._clean_response(response_text)
-                
-                # Verify time accuracy in responses
-                if 'remind' in user_input.lower() or 'reminder' in user_input.lower():
-                    clean_message = await self.verify_time_accuracy(clean_message, user_input)
+            
+            # Make AI call (synchronous)
+            response = self.ai_model.generate_content([system_prompt, user_prompt])
+            response_text = response.text
+            
+            # Clean the response to prevent leaks
+            clean_message = self._clean_response(response_text)
+            
+            # Create response object for validation
+            agent_response = {"message": clean_message}
+            
+            # Validate the response using the enhanced double-check system
+            validation_result = await self.validate_agent_response(
+                user_input, agent_response, self.agent_name, context
+            )
+            
+            # Use validated response if corrections were made
+            final_response = validation_result.get('validated_response', agent_response)
             
             # Log action (internal only)
             user_id = context.get('user_id')
@@ -237,17 +227,15 @@ Do not include any technical details or system information.
                     user_id=user_id,
                     action_type="chat_interaction",
                     entity_type="system",
-                    action_details={"type": "audit_request"},
+                    action_details={"type": "audit_request", "validated": True},
                     success_status=True
                 )
             
             # Return ONLY clean user message
-            return {
-                "message": clean_message
-            }
+            return final_response
             
         except Exception as e:
-            print(f"ERROR in AuditAgent: {e}")
+            logger.error(f"ERROR in AuditAgent: {e}")
             return {
                 "message": "I can help with audit-related questions. What specific audit topic would you like assistance with?"
             }

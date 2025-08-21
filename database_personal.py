@@ -171,7 +171,7 @@ def get_task_context_for_ai(supabase: Client, user_id: str) -> dict:
 def get_memory_context_for_ai(supabase: Client, user_id: str) -> dict:
     """Fetches recent memories for a user."""
     try:
-        res = supabase.table('memory_entries').select('title, content, category, created_at').eq('user_id', user_id).neq('category', 'conversation_history').order('created_at', desc=True).limit(25).execute()
+        res = supabase.table('memories').select('title, content, memory_type, created_at').eq('user_id', user_id).order('created_at', desc=True).limit(25).execute()
         return {"memories": res.data or []}
     except Exception as e:
         print(f"!!! DATABASE ERROR in get_memory_context_for_ai: {e}")
@@ -180,11 +180,11 @@ def get_memory_context_for_ai(supabase: Client, user_id: str) -> dict:
 def get_journal_context_for_ai(supabase: Client, user_id: str) -> dict:
     """Fetches recent journal entries for context."""
     try:
-        res = supabase.table('journals').select('title, content, category, created_at').eq('user_id', user_id).order('created_at', desc=True).limit(10).execute()
-        return {"journals": res.data or []}
+        res = supabase.table('journal_entries').select('title, content, emotional_tone, created_at').eq('user_id', user_id).order('created_at', desc=True).limit(10).execute()
+        return {"journal_entries": res.data or []}
     except Exception as e:
         print(f"!!! DATABASE ERROR in get_journal_context_for_ai: {e}")
-        return {"journals": []}
+        return {"journal_entries": []}
 
 # --- Task Functions ---
 
@@ -236,38 +236,426 @@ def query_tasks(supabase: Client, user_id: str, **filters):
     return res.data or []
 
 # --- Memory & Journal Functions ---
+# Note: Enhanced v4.0 functions are defined below - these are legacy placeholders
 
-def add_memory_entry(supabase: Client, user_id: str, title: str, content: str | None = None, category: str | None = None):
-    if not title or len(title.strip()) == 0: raise ValueError("Title cannot be empty.")
-    entry = {"user_id": user_id, "title": title.strip(), "content": content, "category": category}
-    res = supabase.table("memory_entries").insert(entry).execute()
-    if getattr(res, "error", None): raise Exception(str(res.error))
-    return (res.data or [None])[0]
+# --- V4.0 Journal Functions ---
 
-def update_memory_entry(supabase: Client, user_id: str, memory_id: str, patch: dict):
-    res = supabase.table("memory_entries").update(patch).eq("id", memory_id).eq("user_id", user_id).execute()
-    if getattr(res, "error", None): raise Exception(str(res.error))
-    return (res.data or [None])[0]
-
-def delete_memory_entry(supabase: Client, user_id: str, memory_id: str):
-    supabase.table("memory_entries").delete().eq("id", memory_id).eq("user_id", user_id).execute()
-
-def search_memory_entries(supabase: Client, user_id: str, query: str, limit: int = 5):
+def add_journal_entry(supabase: Client, user_id: str, title: str, content: str, 
+                     mood_score: float = None, emotional_tone: str = 'neutral',
+                     themes: list = None, entry_type: str = 'free_form') -> dict:
+    """Add a new journal entry with v4.0 enhanced features"""
+    if not title or len(title.strip()) == 0: 
+        raise ValueError("Journal title cannot be empty.")
+    if not content or len(content.strip()) == 0:
+        raise ValueError("Journal content cannot be empty.")
+    
+    # Apply typo correction
+    title = apply_typo_correction(title.strip())
+    content = apply_typo_correction(content.strip())
+    
+    # Calculate word count and reading time
+    word_count = len(content.split())
+    reading_time_minutes = max(1, word_count // 200)  # Assume 200 words per minute
+    
+    entry_data = {
+        "user_id": user_id,
+        "title": title,
+        "content": content,
+        "mood_score": mood_score,
+        "emotional_tone": emotional_tone,
+        "themes": themes or [],
+        "word_count": word_count,
+        "reading_time_minutes": reading_time_minutes,
+        "entry_type": entry_type
+    }
+    
     try:
-        sanitized_query = query.replace("'", "''")
-        res = supabase.table("memory_entries").select("title, content, created_at").eq("user_id", user_id).or_(f"title.ilike.%{sanitized_query}%,content.ilike.%{sanitized_query}%").order("created_at", desc=True).limit(limit).execute()
+        res = supabase.table("journal_entries").insert(entry_data).execute()
+        if getattr(res, "error", None): 
+            raise Exception(str(res.error))
+        return (res.data or [None])[0]
+    except Exception as e:
+        print(f"Journal entry creation error: {e}")
+        raise e
+
+def query_journal_entries(supabase: Client, user_id: str, **filters) -> list:
+    """Query journal entries with advanced filtering"""
+    try:
+        q = supabase.table("journal_entries").select("*").eq("user_id", user_id)
+        
+        if filters.get('title_like'): 
+            q = q.ilike('title', f"%{filters['title_like']}%")
+        if filters.get('content_like'): 
+            q = q.ilike('content', f"%{filters['content_like']}%")
+        if filters.get('emotional_tone'): 
+            q = q.eq('emotional_tone', filters['emotional_tone'])
+        if filters.get('mood_min'): 
+            q = q.gte('mood_score', filters['mood_min'])
+        if filters.get('mood_max'): 
+            q = q.lte('mood_score', filters['mood_max'])
+        if filters.get('date_from'): 
+            q = q.gte('created_at', filters['date_from'])
+        if filters.get('date_to'): 
+            q = q.lte('created_at', filters['date_to'])
+        if filters.get('limit'): 
+            q = q.limit(filters['limit'])
+            
+        q = q.order('created_at', desc=True)
+        res = q.execute()
+        
+        if getattr(res, "error", None): 
+            raise Exception(str(res.error))
         return res.data or []
     except Exception as e:
-        print(f"!!! DATABASE ERROR in search_memory_entries: {e}")
+        print(f"Journal query error: {e}")
         return []
 
-def add_journal_entry(supabase: Client, user_id: str, title: str, content: str | None = None, category: str | None = None):
-    # This function is very similar to add_memory_entry
-    if not title or len(title.strip()) == 0: raise ValueError("Title cannot be empty.")
-    entry = {"user_id": user_id, "title": title.strip(), "content": content, "category": category}
-    res = supabase.table("journals").insert(entry).execute()
-    if getattr(res, "error", None): raise Exception(str(res.error))
-    return (res.data or [None])[0]
+def update_journal_entry(supabase: Client, user_id: str, entry_id: str, patch: dict) -> dict:
+    """Update a journal entry"""
+    try:
+        # Apply typo correction to title and content if being updated
+        if 'title' in patch and patch['title']:
+            patch['title'] = apply_typo_correction(patch['title'])
+        if 'content' in patch and patch['content']:
+            patch['content'] = apply_typo_correction(patch['content'])
+            # Recalculate word count and reading time
+            word_count = len(patch['content'].split())
+            patch['word_count'] = word_count
+            patch['reading_time_minutes'] = max(1, word_count // 200)
+        
+        res = supabase.table("journal_entries").update(patch).eq("id", entry_id).eq("user_id", user_id).execute()
+        if getattr(res, "error", None): 
+            raise Exception(str(res.error))
+        return (res.data or [None])[0]
+    except Exception as e:
+        print(f"Journal update error: {e}")
+        raise e
+
+def delete_journal_entry(supabase: Client, user_id: str, entry_id: str):
+    """Delete a journal entry"""
+    try:
+        supabase.table('journal_entries').delete().eq('id', entry_id).eq('user_id', user_id).execute()
+    except Exception as e:
+        print(f"Journal delete error: {e}")
+        raise e
+
+def analyze_mood_patterns(supabase: Client, user_id: str, days: int = 30) -> dict:
+    """Analyze mood patterns from journal entries"""
+    try:
+        from datetime import datetime, timedelta
+        start_date = (datetime.now() - timedelta(days=days)).isoformat()
+        
+        res = supabase.table("journal_entries").select(
+            "mood_score, emotional_tone, created_at"
+        ).eq("user_id", user_id).gte(
+            "created_at", start_date
+        ).not_.is_("mood_score", "null").execute()
+        
+        entries = res.data or []
+        if not entries:
+            return {"message": "No mood data found for the specified period"}
+        
+        # Calculate statistics
+        mood_scores = [float(entry['mood_score']) for entry in entries]
+        avg_mood = sum(mood_scores) / len(mood_scores)
+        
+        # Count emotional tones
+        tone_counts = {}
+        for entry in entries:
+            tone = entry.get('emotional_tone', 'neutral')
+            tone_counts[tone] = tone_counts.get(tone, 0) + 1
+        
+        return {
+            "period_days": days,
+            "entry_count": len(entries),
+            "average_mood": round(avg_mood, 2),
+            "mood_range": {
+                "min": min(mood_scores),
+                "max": max(mood_scores)
+            },
+            "emotional_tone_distribution": tone_counts,
+            "dominant_tone": max(tone_counts.items(), key=lambda x: x[1])[0] if tone_counts else 'neutral'
+        }
+    except Exception as e:
+        print(f"Mood analysis error: {e}")
+        return {"error": str(e)}
+
+# --- V4.0 Memory Functions ---
+
+def add_memory_entry(supabase: Client, user_id: str, title: str, content: str,
+                    memory_type: str = 'general', importance_score: float = 0.5,
+                    emotional_tone: str = 'neutral', tags: list = None,
+                    relationships: list = None, locations: list = None) -> dict:
+    """Add a new memory with v4.0 enhanced features"""
+    if not title or len(title.strip()) == 0: 
+        raise ValueError("Memory title cannot be empty.")
+    if not content or len(content.strip()) == 0:
+        raise ValueError("Memory content cannot be empty.")
+    
+    # Apply typo correction
+    title = apply_typo_correction(title.strip())
+    content = apply_typo_correction(content.strip())
+    
+    memory_data = {
+        "user_id": user_id,
+        "title": title,
+        "content": content,
+        "memory_type": memory_type,
+        "importance_score": max(0.0, min(1.0, importance_score)),  # Ensure 0-1 range
+        "emotional_tone": emotional_tone,
+        "tags": tags or [],
+        "relationships": relationships or [],
+        "locations": locations or []
+    }
+    
+    try:
+        res = supabase.table("memories").insert(memory_data).execute()
+        if getattr(res, "error", None): 
+            raise Exception(str(res.error))
+        return (res.data or [None])[0]
+    except Exception as e:
+        print(f"Memory creation error: {e}")
+        raise e
+
+def search_memories(supabase: Client, user_id: str, query: str, limit: int = 10) -> list:
+    """Search memories with enhanced filtering"""
+    try:
+        sanitized_query = query.replace("'", "''")
+        res = supabase.table("memories").select(
+            "id, title, content, memory_type, importance_score, emotional_tone, tags, created_at"
+        ).eq("user_id", user_id).or_(
+            f"title.ilike.%{sanitized_query}%,content.ilike.%{sanitized_query}%"
+        ).order("importance_score", desc=True).order(
+            "created_at", desc=True
+        ).limit(limit).execute()
+        
+        # Update search frequency for found memories
+        if res.data:
+            memory_ids = [memory['id'] for memory in res.data]
+            supabase.table("memories").update({
+                "search_frequency": supabase.table("memories").select("search_frequency").eq("id", memory_ids[0]).execute().data[0]['search_frequency'] + 1,
+                "last_accessed": datetime.now().isoformat()
+            }).in_("id", memory_ids).execute()
+        
+        return res.data or []
+    except Exception as e:
+        print(f"Memory search error: {e}")
+        return []
+
+def get_memory_timeline(supabase: Client, user_id: str, **filters) -> list:
+    """Get memories organized by timeline"""
+    try:
+        q = supabase.table("memories").select(
+            "id, title, content, memory_type, importance_score, emotional_tone, tags, relationships, locations, created_at"
+        ).eq("user_id", user_id)
+        
+        if filters.get('memory_type'): 
+            q = q.eq('memory_type', filters['memory_type'])
+        if filters.get('importance_min'): 
+            q = q.gte('importance_score', filters['importance_min'])
+        if filters.get('date_from'): 
+            q = q.gte('created_at', filters['date_from'])
+        if filters.get('date_to'): 
+            q = q.lte('created_at', filters['date_to'])
+        if filters.get('emotional_tone'): 
+            q = q.eq('emotional_tone', filters['emotional_tone'])
+        
+        q = q.order('created_at', desc=False)  # Chronological order for timeline
+        if filters.get('limit'): 
+            q = q.limit(filters['limit'])
+            
+        res = q.execute()
+        return res.data or []
+    except Exception as e:
+        print(f"Memory timeline error: {e}")
+        return []
+
+def update_memory_entry(supabase: Client, user_id: str, memory_id: str, patch: dict) -> dict:
+    """Update a memory entry"""
+    try:
+        # Apply typo correction to title and content if being updated
+        if 'title' in patch and patch['title']:
+            patch['title'] = apply_typo_correction(patch['title'])
+        if 'content' in patch and patch['content']:
+            patch['content'] = apply_typo_correction(patch['content'])
+        
+        res = supabase.table("memories").update(patch).eq("id", memory_id).eq("user_id", user_id).execute()
+        if getattr(res, "error", None): 
+            raise Exception(str(res.error))
+        return (res.data or [None])[0]
+    except Exception as e:
+        print(f"Memory update error: {e}")
+        raise e
+
+def delete_memory_entry(supabase: Client, user_id: str, memory_id: str):
+    """Delete a memory entry"""
+    try:
+        supabase.table('memories').delete().eq('id', memory_id).eq('user_id', user_id).execute()
+    except Exception as e:
+        print(f"Memory delete error: {e}")
+        raise e
+
+def analyze_memory_relationships(supabase: Client, user_id: str) -> dict:
+    """Analyze relationships mentioned in memories"""
+    try:
+        res = supabase.table("memories").select(
+            "relationships, emotional_tone, memory_type, importance_score"
+        ).eq("user_id", user_id).not_.is_("relationships", "null").execute()
+        
+        memories = res.data or []
+        if not memories:
+            return {"message": "No relationship data found in memories"}
+        
+        # Analyze relationships
+        relationship_stats = {}
+        for memory in memories:
+            relationships = memory.get('relationships', [])
+            for rel in relationships:
+                if rel not in relationship_stats:
+                    relationship_stats[rel] = {
+                        'mentions': 0,
+                        'emotional_tones': [],
+                        'memory_types': [],
+                        'avg_importance': 0
+                    }
+                
+                relationship_stats[rel]['mentions'] += 1
+                relationship_stats[rel]['emotional_tones'].append(memory.get('emotional_tone', 'neutral'))
+                relationship_stats[rel]['memory_types'].append(memory.get('memory_type', 'general'))
+                relationship_stats[rel]['avg_importance'] += float(memory.get('importance_score', 0.5))
+        
+        # Calculate averages and dominant patterns
+        for rel, stats in relationship_stats.items():
+            stats['avg_importance'] = round(stats['avg_importance'] / stats['mentions'], 2)
+            # Find dominant emotional tone
+            tone_counts = {}
+            for tone in stats['emotional_tones']:
+                tone_counts[tone] = tone_counts.get(tone, 0) + 1
+            stats['dominant_emotional_tone'] = max(tone_counts.items(), key=lambda x: x[1])[0]
+            
+            # Clean up raw lists
+            del stats['emotional_tones']
+            del stats['memory_types']
+        
+        return {
+            "total_relationships": len(relationship_stats),
+            "relationship_analysis": relationship_stats
+        }
+    except Exception as e:
+        print(f"Relationship analysis error: {e}")
+        return {"error": str(e)}
+
+# --- V4.0 Content Classification Functions ---
+
+def classify_and_store_content(supabase: Client, user_id: str, content_text: str,
+                              detected_language: str = 'en', original_text: str = None) -> dict:
+    """Classify content using AI and store results"""
+    try:
+        # Simple rule-based classification for now (can be enhanced with AI later)
+        classification_result = _classify_content_simple(content_text)
+        
+        classification_data = {
+            "user_id": user_id,
+            "content_text": content_text,
+            "original_text": original_text,
+            "detected_language": detected_language,
+            "primary_category": classification_result['primary_category'],
+            "confidence_journal": classification_result['confidence_journal'],
+            "confidence_memory": classification_result['confidence_memory'],
+            "confidence_temporary": classification_result['confidence_temporary'],
+            "confidence_knowledge": classification_result['confidence_knowledge'],
+            "emotional_tone": classification_result['emotional_tone'],
+            "importance_score": classification_result['importance_score'],
+            "suggested_tags": classification_result['suggested_tags'],
+            "classification_reasoning": classification_result['reasoning']
+        }
+        
+        res = supabase.table("content_classifications").insert(classification_data).execute()
+        if getattr(res, "error", None): 
+            raise Exception(str(res.error))
+        return (res.data or [None])[0]
+    except Exception as e:
+        print(f"Content classification error: {e}")
+        raise e
+
+def get_classification_history(supabase: Client, user_id: str, **filters) -> list:
+    """Get classification history with filtering"""
+    try:
+        q = supabase.table("content_classifications").select("*").eq("user_id", user_id)
+        
+        if filters.get('primary_category'): 
+            q = q.eq('primary_category', filters['primary_category'])
+        if filters.get('emotional_tone'): 
+            q = q.eq('emotional_tone', filters['emotional_tone'])
+        if filters.get('date_from'): 
+            q = q.gte('processing_timestamp', filters['date_from'])
+        if filters.get('date_to'): 
+            q = q.lte('processing_timestamp', filters['date_to'])
+        if filters.get('limit'): 
+            q = q.limit(filters['limit'])
+            
+        q = q.order('processing_timestamp', desc=True)
+        res = q.execute()
+        return res.data or []
+    except Exception as e:
+        print(f"Classification history error: {e}")
+        return []
+
+def _classify_content_simple(content_text: str) -> dict:
+    """Simple rule-based content classification (placeholder for AI classification)"""
+    content_lower = content_text.lower()
+    
+    # Keywords for different categories
+    journal_keywords = ['today', 'feel', 'felt', 'mood', 'emotion', 'diary', 'personal', 'reflection']
+    memory_keywords = ['remember', 'recall', 'memory', 'happened', 'experience', 'milestone', 'achievement']
+    knowledge_keywords = ['learn', 'learned', 'fact', 'information', 'knowledge', 'understand', 'concept']
+    
+    # Count matches
+    journal_score = sum(1 for word in journal_keywords if word in content_lower)
+    memory_score = sum(1 for word in memory_keywords if word in content_lower)
+    knowledge_score = sum(1 for word in knowledge_keywords if word in content_lower)
+    
+    # Determine primary category
+    scores = {
+        'JOURNAL_ENTRY': journal_score,
+        'MEMORY': memory_score,
+        'KNOWLEDGE': knowledge_score,
+        'TEMPORARY_INFO': 1  # Default fallback
+    }
+    
+    primary_category = max(scores.items(), key=lambda x: x[1])[0]
+    
+    # Simple emotional tone detection
+    positive_words = ['happy', 'joy', 'good', 'great', 'amazing', 'wonderful', 'love']
+    negative_words = ['sad', 'angry', 'bad', 'terrible', 'hate', 'awful', 'difficult']
+    
+    positive_count = sum(1 for word in positive_words if word in content_lower)
+    negative_count = sum(1 for word in negative_words if word in content_lower)
+    
+    if positive_count > negative_count:
+        emotional_tone = 'positive'
+    elif negative_count > positive_count:
+        emotional_tone = 'negative'
+    else:
+        emotional_tone = 'neutral'
+    
+    return {
+        'primary_category': primary_category,
+        'confidence_journal': min(1.0, journal_score * 0.2),
+        'confidence_memory': min(1.0, memory_score * 0.2),
+        'confidence_temporary': 0.3,  # Default
+        'confidence_knowledge': min(1.0, knowledge_score * 0.2),
+        'emotional_tone': emotional_tone,
+        'importance_score': 0.5,  # Default
+        'suggested_tags': [],
+        'reasoning': f'Classified as {primary_category} based on keyword analysis'
+    }
+
+# --- Backward Compatibility Functions ---
+
+def search_memory_entries(supabase: Client, user_id: str, query: str, limit: int = 5):
+    """Legacy function - redirects to new v4.0 search_memories"""
+    return search_memories(supabase, user_id, query, limit)
 
 # --- AI Action & Reminder Functions ---
 
