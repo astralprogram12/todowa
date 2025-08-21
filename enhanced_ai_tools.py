@@ -34,6 +34,11 @@ def send_reply_message(phone_number: str, message: str, user_id: str = None) -> 
     Returns:
         Dict indicating success or failure.
     """
+    # Check if we're in CLI mode
+    if phone_number == "CLI_TEST_USER":
+        logger.info(f"CLI Mode: Message ready for user {user_id}: {message[:100]}...")
+        return {"success": True, "message": "Message prepared for CLI display."}
+    
     if not services:
         error_msg = "services.py module could not be loaded. Cannot send message."
         logger.error(error_msg)

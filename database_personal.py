@@ -6,6 +6,101 @@ from datetime import date, datetime, timezone, timedelta
 import uuid
 import json
 from config import UNVERIFIED_LIMIT, VERIFIED_LIMIT
+import re
+from src.ai_text_processors.typo_correction_agent import apply_ai_typo_correction
+
+# --- Typo Correction and Validation Functions ---
+
+def apply_typo_correction(text: str) -> str:
+    """
+    Apply AI-powered typo correction to user input.
+    
+    This function now uses an AI agent for intelligent, context-aware
+    typo correction that works with multiple languages.
+    """
+    return apply_ai_typo_correction(text)
+
+def validate_priority(priority: str) -> str:
+    """Validate and normalize priority value"""
+    if not priority:
+        return 'medium'  # default
+    
+    priority_lower = priority.lower().strip()
+    valid_priorities = ['low', 'medium', 'high']
+    
+    if priority_lower in valid_priorities:
+        return priority_lower
+    
+    # Handle common variations
+    priority_mapping = {
+        'urgent': 'high',
+        'important': 'high',
+        'critical': 'high',
+        'normal': 'medium',
+        'regular': 'medium',
+        'standard': 'medium',
+        'minor': 'low',
+        'optional': 'low',
+        'later': 'low'
+    }
+    
+    return priority_mapping.get(priority_lower, 'medium')
+
+def validate_difficulty(difficulty: str) -> str:
+    """Validate and normalize difficulty value"""
+    if not difficulty:
+        return 'medium'  # default
+    
+    difficulty_lower = difficulty.lower().strip()
+    valid_difficulties = ['easy', 'medium', 'hard']
+    
+    if difficulty_lower in valid_difficulties:
+        return difficulty_lower
+    
+    # Handle common variations
+    difficulty_mapping = {
+        'simple': 'easy',
+        'basic': 'easy',
+        'quick': 'easy',
+        'normal': 'medium',
+        'regular': 'medium',
+        'standard': 'medium',
+        'difficult': 'hard',
+        'complex': 'hard',
+        'challenging': 'hard',
+        'tough': 'hard'
+    }
+    
+    return difficulty_mapping.get(difficulty_lower, 'medium')
+
+def validate_status(status: str) -> str:
+    """Validate and normalize status value"""
+    if not status:
+        return 'todo'  # default
+    
+    status_lower = status.lower().strip()
+    valid_statuses = ['todo', 'doing', 'done']
+    
+    if status_lower in valid_statuses:
+        return status_lower
+    
+    # Handle common variations
+    status_mapping = {
+        'pending': 'todo',
+        'new': 'todo',
+        'open': 'todo',
+        'active': 'doing',
+        'in-progress': 'doing',
+        'in_progress': 'doing',
+        'working': 'doing',
+        'current': 'doing',
+        'completed': 'done',
+        'finished': 'done',
+        'complete': 'done',
+        'closed': 'done'
+    }
+    
+    return status_mapping.get(status_lower, 'todo')
 
 # --- User & Usage ---
 
@@ -94,11 +189,35 @@ def get_journal_context_for_ai(supabase: Client, user_id: str) -> dict:
 # --- Task Functions ---
 
 def add_task_entry(supabase: Client, user_id: str, **kwargs):
+    """Add a task entry with proper constraint validation"""
     kwargs['user_id'] = user_id
-    if not kwargs.get('title') or len(kwargs['title'].strip()) == 0: raise ValueError("Task title cannot be empty.")
-    res = supabase.table("tasks").insert(kwargs).execute()
-    if getattr(res, "error", None): raise Exception(str(res.error))
-    return (res.data or [None])[0]
+    
+    # Validate and clean inputs
+    if not kwargs.get('title') or len(kwargs['title'].strip()) == 0: 
+        raise ValueError("Task title cannot be empty.")
+    
+    # Apply typo correction to title
+    kwargs['title'] = apply_typo_correction(kwargs['title'])
+    
+    # Validate and normalize constraint fields
+    if 'priority' in kwargs and kwargs['priority']:
+        kwargs['priority'] = validate_priority(kwargs['priority'])
+    
+    if 'difficulty' in kwargs and kwargs['difficulty']:
+        kwargs['difficulty'] = validate_difficulty(kwargs['difficulty'])
+        
+    if 'status' in kwargs and kwargs['status']:
+        kwargs['status'] = validate_status(kwargs['status'])
+    
+    try:
+        res = supabase.table("tasks").insert(kwargs).execute()
+        if getattr(res, "error", None): 
+            print(f"Task creation error: {res.error}")
+            raise Exception(str(res.error))
+        return (res.data or [None])[0]
+    except Exception as e:
+        print(f"Task creation error: {e}")
+        raise e
 
 def update_task_entry(supabase: Client, user_id: str, task_id: str, patch: dict):
     res = supabase.table("tasks").update(patch).eq("id", task_id).eq("user_id", user_id).execute()

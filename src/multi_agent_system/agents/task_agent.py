@@ -77,13 +77,25 @@ Do not include any technical details.
                     try:
                         tasks = database.query_tasks(self.supabase, user_id)
                         if tasks:
-                            task_list = "\n".join([f"• {task.get('title', 'Untitled task')} ({task.get('status', 'todo')})" for task in tasks])
-                            clean_message = f"Here are your current tasks:\n{task_list}\n\nAnything else I can help you with?"
+                            # Create detailed task list with category and priority info
+                            task_details = []
+                            for task in tasks:
+                                title = task.get('title', 'Untitled task')
+                                status = task.get('status', 'todo')
+                                priority = task.get('priority', 'medium')
+                                category = task.get('category', 'general')
+                                
+                                # Format each task with details
+                                task_line = f"• {title} [{priority} priority, {category} category, {status}]"
+                                task_details.append(task_line)
+                            
+                            task_list = "\n".join(task_details)
+                            clean_message = f"Here are your current tasks:\n{task_list}\n\nNeed help with anything else?"
                         else:
-                            clean_message = "You don't have any tasks right now. Would you like to create one?"
+                            clean_message = "You don't have any tasks right now. Ready to add some? Just tell me what you need to do!"
                     except Exception as e:
                         print(f"Task retrieval error: {e}")
-                        clean_message = "I'm having trouble accessing your tasks right now. Please try again."
+                        clean_message = "I'm having trouble accessing your tasks right now. Please try again in a moment."
                 else:
                     clean_message = "I'd need to set up your account first to show your tasks."
                     
@@ -179,18 +191,23 @@ RESPONSE: [ask for clarification]
                     # Handle task creation using natural language understanding
                     if user_id:
                         try:
+                            # Apply typo correction to user input first
+                            corrected_input = database.apply_typo_correction(user_input)
+                            
                             # Let AI extract task details naturally
                             ai_prompt = f"""
-User said: "{user_input}"
+User said: "{corrected_input}"
 
 The user wants to create a new task. Based on their natural language input, extract:
-1. The main task title/description
+1. The main task title/description (clean and clear)
 2. Any priority level mentioned (low, medium, high)
-3. A natural response to confirm the task creation
+3. Any category mentioned (work, personal, health, shopping, etc.)
+4. A natural, enthusiastic response to confirm the task creation
 
 Please respond in this format:
 TITLE: [clear task title]
 PRIORITY: [low/medium/high, default to medium]
+CATEGORY: [category or 'general' if not specified]
 RESPONSE: [natural friendly confirmation]
 """
                             
@@ -198,8 +215,9 @@ RESPONSE: [natural friendly confirmation]
                             ai_response = response.text
                             
                             # Parse AI response
-                            title = user_input.strip()  # fallback
+                            title = corrected_input.strip()  # fallback
                             priority = 'medium'
+                            category = 'general'
                             user_response = f"Got it! I've added '{title}' to your tasks."
                             
                             for line in ai_response.split('\n'):
@@ -210,27 +228,37 @@ RESPONSE: [natural friendly confirmation]
                                         title = extracted_title
                                 elif line.startswith('PRIORITY:'):
                                     priority = line.replace('PRIORITY:', '').strip()
+                                elif line.startswith('CATEGORY:'):
+                                    category = line.replace('CATEGORY:', '').strip()
                                 elif line.startswith('RESPONSE:'):
                                     user_response = line.replace('RESPONSE:', '').strip()
                             
-                            # Create the task
+                            # Create the task with validation
                             task_data = database.add_task_entry(
                                 supabase=self.supabase,
                                 user_id=user_id,
                                 title=title,
-                                category='general',
-                                priority=priority
+                                category=category,
+                                priority=priority,
+                                status='todo'
                             )
                             
                             if task_data:
-                                clean_message = user_response
+                                # Create detailed success response with category and priority
+                                clean_message = f"{user_response} I've set it as {priority} priority in your {category} category. You're all set!"
                             else:
-                                clean_message = f"I'll help you remember to {title}. What else can I assist you with?"
+                                # This shouldn't happen with our improved error handling, but just in case
+                                clean_message = f"I had trouble saving that task, but I'll help you remember to {title}. What else can I assist you with?"
+                                
                         except Exception as e:
                             print(f"Task creation error: {e}")
-                            clean_message = f"I'll help you remember to {user_input.strip()}. What else can I assist you with?"
+                            # Provide more helpful error message to user
+                            if "constraint" in str(e).lower():
+                                clean_message = "I had trouble creating that task due to some formatting issues. Could you try rephrasing it?"
+                            else:
+                                clean_message = f"I'll help you remember to {user_input.strip()}. I had a small hiccup saving it, but I've got it noted. What else can I assist you with?"
                     else:
-                        clean_message = f"I'll help you remember to {user_input.strip()}. What else can I assist you with?"
+                        clean_message = "I'd be happy to help you create tasks! To get started, just tell me what you need to do."
             else:
                 # General task-related conversation
                 user_prompt = f"""

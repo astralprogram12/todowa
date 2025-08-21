@@ -79,7 +79,11 @@ class Orchestrator:
             context = await self._get_or_create_context(user_id, conversation_id)
             classification = await self._classify_user_input(user_input, context)
             agent_responses = []
-            primary_agent_name = classification.get('primary_intent')
+            primary_intent = classification.get('primary_intent')
+            
+            # Map enhanced intent classification to agent names
+            primary_agent_name = self._map_intent_to_agent(primary_intent)
+            
             if primary_agent_name == 'clarification_needed':
                 final_response_dict = {"message": "I'm not quite sure what you mean. Could you please rephrase that?", "status": "clarification_needed"}
             elif primary_agent_name in self.agents:
@@ -137,3 +141,22 @@ class Orchestrator:
         context = self.user_contexts[context_key]
         if len(context['history']) > 10: context['history'] = context['history'][-10:]
         return context
+    
+    def _map_intent_to_agent(self, intent: str) -> str:
+        """Map enhanced intent classification to actual agent names"""
+        if not intent:
+            return 'general'
+        
+        # Handle enhanced intent format (query_task, action_task, etc.)
+        if intent.startswith('query_'):
+            domain = intent.replace('query_', '')
+            return domain if domain in self.agents else 'general'
+        elif intent.startswith('action_'):
+            domain = intent.replace('action_', '')
+            return domain if domain in self.agents else 'general'
+        elif intent == 'chat' or intent == 'general':
+            return 'general'
+        elif intent in self.agents:
+            return intent
+        else:
+            return 'general'

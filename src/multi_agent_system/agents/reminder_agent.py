@@ -53,11 +53,47 @@ Respond like a helpful personal assistant managing reminders.
             
             system_prompt = self.comprehensive_prompts.get('core_system', 'You are a helpful reminder assistant.')
             
-            # Check if this is a reminder request
-            is_setting_reminder = any(phrase in user_input.lower() for phrase in 
-                ['remind me', 'reminder', 'don\'t forget', 'remember to'])
+            # Use intent classification from routing_info to determine operation
+            primary_intent = routing_info.get('primary_intent', '') if routing_info else ''
+            operation = routing_info.get('operation', '') if routing_info else ''
             
-            if is_setting_reminder:
+            # Determine operation type based on classification
+            is_query_operation = (primary_intent == 'query_reminder' or operation == 'read')
+            is_action_operation = (primary_intent == 'action_reminder' or operation in ['create', 'update', 'delete'])
+            
+            user_id = context.get('user_id')
+            
+            if is_query_operation:
+                # Handle query operations (read reminders from tasks table)
+                user_prompt = f"""
+User wants to see their reminders: {user_input}
+
+Respond naturally with their current reminders. Be helpful and conversational.
+Do not include any technical details.
+"""
+                
+                # Get user's reminders from tasks table (reminder_at field)
+                if user_id:
+                    try:
+                        # Get all tasks with reminder_at field set
+                        reminders = database.get_all_reminders(self.supabase, user_id)
+                        
+                        if reminders:
+                            reminder_list = "\n".join([f"• {reminder.get('title', 'Untitled reminder')} (Reminder: {reminder.get('reminder_at', 'No time set')})" for reminder in reminders])
+                            clean_message = f"Here are your current reminders:\n{reminder_list}\n\nAnything else I can help you with?"
+                        else:
+                            clean_message = "You don't have any reminders right now. Would you like to create one?"
+                    except Exception as e:
+                        print(f"Reminder retrieval error: {e}")
+                        clean_message = "I'm having trouble accessing your reminders right now. Please try again."
+                else:
+                    clean_message = "I'd need to set up your account first to show your reminders."
+                    
+            elif is_action_operation:
+                # Handle action operations (create reminders using A+C approach)
+                # A: Always create task + reminder (using reminder_at field)
+                # C: Ask for clarification if task isn't clear
+                
                 # Extract reminder text
                 reminder_text = user_input
                 for phrase in ['remind me to', 'remind me about', 'set reminder for', 'reminder to']:
@@ -66,39 +102,36 @@ Respond like a helpful personal assistant managing reminders.
                         reminder_text = user_input[start_idx:].strip()
                         break
                 
-                user_prompt = f"""
-User wants a reminder: {reminder_text}
-
-Confirm the reminder in a natural, helpful way.
-Do not include any technical details.
-"""
-                
-                # Make AI call (synchronous)
-                response = self.ai_model.generate_content([system_prompt, user_prompt])
-                response_text = response.text
-                
-                # Create reminder internally
-                user_id = context.get('user_id')
+                # Create task with reminder_at field (simplified A+C approach)
                 if user_id:
                     try:
-                        reminder_data = database.add_reminder_entry(
+                        from datetime import datetime, timedelta, timezone
+                        
+                        # Set reminder for tomorrow as default (can be enhanced later)
+                        tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
+                        reminder_time = tomorrow.replace(hour=9, minute=0, second=0, microsecond=0).isoformat()
+                        
+                        # Create the task with reminder_at field
+                        task_data = database.add_task_entry(
                             supabase=self.supabase,
                             user_id=user_id,
-                            reminder_text=reminder_text,
-                            reminder_time=None,
-                            reminder_type='time_based'
+                            title=reminder_text,
+                            category='reminder_based',
+                            reminder_at=reminder_time
                         )
                         
-                        if reminder_data:
-                            clean_message = f"Perfect! I'll remind you to {reminder_text}. Is there anything else I can help you with?"
+                        if task_data:
+                            clean_message = f"Perfect! I've created a task '{reminder_text}' with a reminder set for tomorrow. Is there anything else I can help you with?"
                         else:
                             clean_message = f"I've got it! I'll make sure to remind you about {reminder_text}."
+                            
                     except Exception as e:
                         print(f"Reminder creation error: {e}")
-                        clean_message = f"I've got it! I'll make sure to remind you about {reminder_text}."
+                        clean_message = f"I'm having trouble setting up that reminder right now. Please try again."
                 else:
-                    clean_message = f"I've got it! I'll make sure to remind you about {reminder_text}."
+                    clean_message = f"I'd need to set up your account first to create reminders."
             else:
+                # General reminder-related conversation
                 user_prompt = f"""
 User said: {user_input}
 
@@ -112,13 +145,15 @@ Do not include any technical details.
                 clean_message = self._clean_response(response_text)
             
             # Log action (internal only)
-            user_id = context.get('user_id')
             if user_id:
+                action_type = "query_reminders" if is_query_operation else ("set_reminder" if is_action_operation else "chat_interaction")
+                entity_type = "reminder" if (is_query_operation or is_action_operation) else "system"
+                
                 self._log_action(
                     user_id=user_id,
-                    action_type="set_reminder" if is_setting_reminder else "chat_interaction",
-                    entity_type="reminder" if is_setting_reminder else "system",
-                    action_details={"type": "reminder_management"},
+                    action_type=action_type,
+                    entity_type=entity_type,
+                    action_details={"operation": operation, "intent": primary_intent},
                     success_status=True
                 )
             
