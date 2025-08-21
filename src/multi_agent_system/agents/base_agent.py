@@ -3,6 +3,7 @@
 
 import database_personal as database
 import os
+import re
 
 class BaseAgent:
     """Base agent class with leak-proof architecture."""
@@ -55,6 +56,29 @@ IMPORTANT: Your response must be ONLY user-friendly text. Never include:
         Respond as a helpful assistant would in natural conversation.
         """
         return f"{core_identity}{leak_prevention}"
+    
+    def _clean_response(self, response_text):
+        """Clean response text to prevent system leaks."""
+        if not response_text:
+            return ""
+        
+        # Remove JSON structures
+        clean_message = re.sub(r'\{[^}]*\}', '', response_text)
+        
+        # Remove obvious system references
+        system_terms = [
+            'actions":', 'status":', 'entity_type', 'action_type', 
+            'supabase', 'database', 'agent', 'routing', 'classification',
+            'error:', 'ERROR:', 'DEBUG:', 'INFO:', 'WARNING:'
+        ]
+        
+        for term in system_terms:
+            clean_message = re.sub(rf'.*{re.escape(term)}.*\n?', '', clean_message, flags=re.IGNORECASE)
+        
+        # Remove multiple whitespace and clean up
+        clean_message = re.sub(r'\s+', ' ', clean_message).strip()
+        
+        return clean_message
         
     async def process(self, user_input, context, routing_info=None):
         """Process user input and return a response."""
@@ -70,30 +94,9 @@ IMPORTANT: Your response must be ONLY user-friendly text. Never include:
                 action_type=action_type,
                 entity_type=entity_type,
                 entity_id=entity_id,
-                action_details=action_details or {},
+                action_details=action_details,
                 success_status=success_status,
                 error_details=error_details
             )
         except Exception as e:
-            print(f"!!! AGENT LOGGING ERROR: {e}")
-    
-    def _clean_response(self, message):
-        """Ensure response contains ONLY user-friendly content."""
-        if not message:
-            return "I'm here to help! How can I assist you?"
-        
-        # Remove any technical artifacts that might have leaked
-        import re
-        # Remove JSON-like structures
-        message = re.sub(r'\{[^{}]*\}', '', message)
-        # Remove array-like structures
-        message = re.sub(r'\[[^\[\]]*\]', '', message)
-        # Remove technical keywords
-        technical_terms = ['json', 'actions', 'status', 'error', 'debug', 'log', 'system']
-        for term in technical_terms:
-            message = re.sub(f'\\b{term}\\b', '', message, flags=re.IGNORECASE)
-        
-        # Clean up extra whitespace
-        message = ' '.join(message.split())
-        
-        return message.strip() or "I'm here to help! How can I assist you?"
+            print(f"Logging error in {self.agent_name}: {e}")

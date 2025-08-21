@@ -33,7 +33,7 @@ class ExpertAgent(BaseAgent):
     
     def _build_expert_system_prompt(self, prompts_dict):
         core_identity = prompts_dict.get('00_core_identity', 'You are a knowledgeable expert advisor.')
-        ai_interactions = prompts_dict.get('04_ai_interactions', '')
+        expert_specialized = prompts_dict.get('11_expert_specialized', '')
         leak_prevention = """
         
 CRITICAL: Provide expert advice naturally. Never include:
@@ -41,9 +41,9 @@ CRITICAL: Provide expert advice naturally. Never include:
 - JSON, debugging info, or technical formatting
 - References to agents, databases, or system architecture
 
-Respond like a knowledgeable expert consultant.
+Respond like a knowledgeable expert consultant providing strategic advice.
         """
-        return f"{core_identity}\n\n{ai_interactions}{leak_prevention}"
+        return f"{core_identity}\n\n{expert_specialized}{leak_prevention}"
 
     async def process(self, user_input, context, routing_info=None):
         try:

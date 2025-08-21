@@ -34,13 +34,29 @@ class IntentClassifierAgent(BaseAgent):
     
     def _build_classifier_system_prompt(self, prompts_dict):
         core_identity = prompts_dict.get('00_core_identity', 'You are an intent classification assistant.')
-        # This agent is internal-only, but still prevent leaks just in case
-        leak_prevention = """
+        decision_tree = prompts_dict.get('09_intelligent_decision_tree', '')
         
-You classify user intents. Return only classification data, no user-facing messages.
-Never include system details, debugging info, or technical formatting in any output.
-        """
-        return f"{core_identity}{leak_prevention}"
+        enhanced_prompt = f"""{core_identity}
+
+{decision_tree}
+
+You are the central classification system. Use the 9-branch decision tree to analyze user input.
+
+CLASSIFICATION INSTRUCTIONS:
+1. Apply the priority system (Memory > Silent Mode > Journal > AI Actions > Reminders > Tasks > Guide > Expert > Chat)
+2. Use pattern matching for each branch
+3. Calculate confidence scores
+4. Generate smart assumptions based on detected patterns
+5. Return structured JSON with primary_intent, confidence, and assumptions
+
+Available agents: general, task, reminder, information, guide, expert, coder, audit, silent_mode, context, preference, action, silent
+
+Return only classification data, no user-facing messages.
+
+CRITICAL: Never include system details, debugging info, or technical formatting in any output.
+"""
+        
+        return enhanced_prompt
 
     async def classify_intent(self, user_input, context):
         """Classify user intent - internal function, not user-facing."""
@@ -51,7 +67,7 @@ Never include system details, debugging info, or technical formatting in any out
             system_prompt = self.comprehensive_prompts.get('core_system', 'You are an intent classification assistant.')
             
             user_prompt = f"""
-Classify this user input: {user_input}
+Classify this user input using the 9-branch decision tree: {user_input}
 
 Return JSON with:
 {{
@@ -62,7 +78,7 @@ Return JSON with:
 
 Available agents: general, task, reminder, information, help, guide, expert, coder, audit, silent_mode, context, preference, action, silent
 """
-            
+      
             # Make AI call (synchronous)
             response = self.ai_model.generate_content([system_prompt, user_prompt])
             response_text = response.text

@@ -33,7 +33,7 @@ class InformationAgent(BaseAgent):
     
     def _build_information_system_prompt(self, prompts_dict):
         core_identity = prompts_dict.get('00_core_identity', 'You are a helpful information assistant.')
-        ai_interactions = prompts_dict.get('04_ai_interactions', '')
+        information_specialized = prompts_dict.get('14_information_specialized', '')
         leak_prevention = """
         
 CRITICAL: Respond only with helpful, natural information. Never include:
@@ -43,7 +43,7 @@ CRITICAL: Respond only with helpful, natural information. Never include:
 
 Be conversational and informative like a knowledgeable friend.
         """
-        return f"{core_identity}\n\n{ai_interactions}{leak_prevention}"
+        return f"{core_identity}\n\n{information_specialized}{leak_prevention}"
 
     async def process(self, user_input: str, context: dict, routing_info: dict) -> dict:
         try:

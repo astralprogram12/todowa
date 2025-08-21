@@ -33,7 +33,7 @@ class CoderAgent(BaseAgent):
     
     def _build_coder_system_prompt(self, prompts_dict):
         core_identity = prompts_dict.get('00_core_identity', 'You are a helpful coding assistant.')
-        ai_interactions = prompts_dict.get('04_ai_interactions', '')
+        coder_specialized = prompts_dict.get('10_coder_specialized', '')
         leak_prevention = """
         
 CRITICAL: Provide coding help naturally. Never include:
@@ -43,7 +43,7 @@ CRITICAL: Provide coding help naturally. Never include:
 
 Respond like a helpful programming mentor. Code examples are fine, but no system internals.
         """
-        return f"{core_identity}\n\n{ai_interactions}{leak_prevention}"
+        return f"{core_identity}\n\n{coder_specialized}{leak_prevention}"
 
     async def process(self, user_input, context, routing_info=None):
         try:
@@ -65,13 +65,7 @@ Do not include any system internals or technical architecture details.
             
             # For coding, we want to preserve code blocks but remove system details
             # Don't over-clean code examples
-            clean_message = response_text
-            
-            # Only remove obvious system leaks, preserve legitimate code
-            import re
-            clean_message = re.sub(r'"actions":\s*\[[^\]]*\]', '', clean_message)
-            clean_message = re.sub(r'"status":\s*"[^"]*"', '', clean_message)
-            clean_message = ' '.join(clean_message.split())
+            clean_message = self._clean_response(response_text)
             
             if not clean_message.strip():
                 clean_message = "I'd be happy to help with your coding question! Could you provide more details about what you're working on?"

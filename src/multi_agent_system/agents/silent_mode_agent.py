@@ -33,6 +33,7 @@ class SilentModeAgent(BaseAgent):
     
     def _build_silent_mode_system_prompt(self, prompts_dict):
         core_identity = prompts_dict.get('00_core_identity', 'You are a helpful assistant for managing quiet time.')
+        silent_mode = prompts_dict.get('05_silent_mode', '')
         leak_prevention = """
         
 CRITICAL: Help with quiet/silent mode naturally. Never include:
@@ -42,7 +43,7 @@ CRITICAL: Help with quiet/silent mode naturally. Never include:
 
 Respond like a considerate assistant managing notification settings.
         """
-        return f"{core_identity}{leak_prevention}"
+        return f"{core_identity}\n\n{silent_mode}{leak_prevention}"
 
     async def process(self, user_input, context, routing_info=None):
         try:
@@ -70,8 +71,8 @@ Do not include any technical details or system information.
             if user_id:
                 self._log_action(
                     user_id=user_id,
-                    action_type="silent_mode_start",
-                    entity_type="silent_session",
+                    action_type="silent_mode_interaction",
+                    entity_type="system",
                     action_details={"type": "silent_mode_management"},
                     success_status=True
                 )
@@ -84,5 +85,5 @@ Do not include any technical details or system information.
         except Exception as e:
             print(f"ERROR in SilentModeAgent: {e}")
             return {
-                "message": "I can help you manage your quiet time settings. What would you like to adjust?"
+                "message": "I can help you manage your quiet time settings. What would you like to do?"
             }

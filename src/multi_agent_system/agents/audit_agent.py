@@ -33,7 +33,7 @@ class AuditAgent(BaseAgent):
     
     def _build_audit_system_prompt(self, prompts_dict):
         core_identity = prompts_dict.get('00_core_identity', 'You are a helpful audit assistant.')
-        safety_validation = prompts_dict.get('07_safety_validation', '')
+        audit_specialized = prompts_dict.get('13_audit_specialized', '')
         leak_prevention = """
         
 CRITICAL: Provide audit information naturally. Never include:
@@ -43,7 +43,7 @@ CRITICAL: Provide audit information naturally. Never include:
 
 Respond like a professional audit consultant.
         """
-        return f"{core_identity}\n\n{safety_validation}{leak_prevention}"
+        return f"{core_identity}\n\n{audit_specialized}{leak_prevention}"
 
     async def process(self, user_input, context, routing_info=None):
         try:

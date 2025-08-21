@@ -33,7 +33,7 @@ class GuideAgent(BaseAgent):
     
     def _build_guide_system_prompt(self, prompts_dict):
         core_identity = prompts_dict.get('00_core_identity', 'You are a helpful guide.')
-        ai_interactions = prompts_dict.get('04_ai_interactions', '')
+        guide_specialized = prompts_dict.get('12_guide_specialized', '')
         leak_prevention = """
         
 CRITICAL: Provide guidance naturally. Never include:
@@ -41,9 +41,9 @@ CRITICAL: Provide guidance naturally. Never include:
 - JSON, debugging info, or technical formatting
 - References to agents, databases, or system architecture
 
-Respond like a knowledgeable mentor or teacher.
+Respond like a knowledgeable mentor or teacher providing step-by-step guidance.
         """
-        return f"{core_identity}\n\n{ai_interactions}{leak_prevention}"
+        return f"{core_identity}\n\n{guide_specialized}{leak_prevention}"
 
     async def process(self, user_input, context, routing_info=None):
         try:
