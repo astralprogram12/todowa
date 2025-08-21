@@ -34,6 +34,7 @@ class GeneralAgent(BaseAgent):
     def _build_general_system_prompt(self, prompts_dict):
         core_identity = prompts_dict.get('00_core_identity', 'You are a friendly, helpful assistant.')
         ai_interactions = prompts_dict.get('04_ai_interactions', '')
+        general_specialized = prompts_dict.get('18_general_specialized', '')
         leak_prevention = """
         
 CRITICAL: Be conversational and natural. Never include:
@@ -43,7 +44,7 @@ CRITICAL: Be conversational and natural. Never include:
 
 Respond like a helpful, knowledgeable friend in natural conversation.
         """
-        return f"{core_identity}\n\n{ai_interactions}{leak_prevention}"
+        return f"{core_identity}\n\n{ai_interactions}\n\n{general_specialized}{leak_prevention}"
 
     async def process(self, user_input, context, routing_info=None):
         try:

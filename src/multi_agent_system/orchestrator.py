@@ -22,7 +22,8 @@ import enhanced_ai_tools
 from .agents import (
     BaseAgent, TaskAgent, ReminderAgent, SilentModeAgent,
     CoderAgent, AuditAgent, ExpertAgent, GuideAgent,
-    IntentClassifierAgent , InformationAgent, GeneralAgent
+    IntentClassifierAgent, InformationAgent, GeneralAgent,
+    ContextAgent, PreferenceAgent, ActionAgent, HelpAgent, SilentAgent
 )
 from .response_combiner import ResponseCombiner
 
@@ -38,7 +39,7 @@ class Orchestrator:
         self._initialize_agents()
     
     def _initialize_agents(self):
-        # ... (initializations are correct)
+        # Initialize all available agents
         self.agents['task'] = TaskAgent(self.supabase, self.ai_model)
         self.agents['reminder'] = ReminderAgent(self.supabase, self.ai_model)
         self.agents['silent_mode'] = SilentModeAgent(self.supabase, self.ai_model)
@@ -48,6 +49,11 @@ class Orchestrator:
         self.agents['guide'] = GuideAgent(self.supabase, self.ai_model)
         self.agents['information'] = InformationAgent(self.supabase, self.ai_model)
         self.agents['general'] = GeneralAgent(self.supabase, self.ai_model)
+        self.agents['context'] = ContextAgent(self.supabase, self.ai_model)
+        self.agents['preference'] = PreferenceAgent(self.supabase, self.ai_model)
+        self.agents['action'] = ActionAgent(self.supabase, self.ai_model)
+        self.agents['help'] = HelpAgent(self.supabase, self.ai_model)
+        self.agents['silent'] = SilentAgent(self.supabase, self.ai_model)
 
     def load_all_agent_prompts(self, prompts_dir: str):
         # ... (this function is correct)

@@ -34,6 +34,7 @@ class TaskAgent(BaseAgent):
     def _build_task_system_prompt(self, prompts_dict):
         core_identity = prompts_dict.get('00_core_identity', 'You are a helpful task management assistant.')
         task_processing = prompts_dict.get('02_task_processing', '')
+        task_specialized = prompts_dict.get('15_task_specialized', '')
         leak_prevention = """
         
 CRITICAL: Help with tasks naturally. Never include:
@@ -43,7 +44,7 @@ CRITICAL: Help with tasks naturally. Never include:
 
 Respond like a helpful personal assistant would.
         """
-        return f"{core_identity}\n\n{task_processing}{leak_prevention}"
+        return f"{core_identity}\n\n{task_processing}\n\n{task_specialized}{leak_prevention}"
 
     async def process(self, user_input, context, routing_info=None):
         try:

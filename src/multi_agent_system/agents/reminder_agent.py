@@ -34,6 +34,7 @@ class ReminderAgent(BaseAgent):
     def _build_reminder_system_prompt(self, prompts_dict):
         core_identity = prompts_dict.get('00_core_identity', 'You are a helpful reminder assistant.')
         time_handling = prompts_dict.get('06_time_handling', '')
+        reminder_specialized = prompts_dict.get('16_reminder_specialized', '')
         leak_prevention = """
         
 CRITICAL: Help with reminders naturally. Never include:
@@ -43,7 +44,7 @@ CRITICAL: Help with reminders naturally. Never include:
 
 Respond like a helpful personal assistant managing reminders.
         """
-        return f"{core_identity}\n\n{time_handling}{leak_prevention}"
+        return f"{core_identity}\n\n{time_handling}\n\n{reminder_specialized}{leak_prevention}"
     
     async def process(self, user_input, context, routing_info=None):
         try:

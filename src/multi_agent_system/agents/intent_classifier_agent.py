@@ -49,7 +49,18 @@ CLASSIFICATION INSTRUCTIONS:
 4. Generate smart assumptions based on detected patterns
 5. Return structured JSON with primary_intent, confidence, and assumptions
 
-Available agents: general, task, reminder, information, guide, expert, coder, audit, silent_mode, context, preference, action, silent
+CLASSIFICATION TO AGENT MAPPING:
+- memory → context (memory operations handled by context_agent)
+- silent → silent_mode (silent mode operations)
+- journal → information (knowledge entries handled by information_agent)
+- ai_action → task (recurring actions handled by task_agent)
+- reminder → reminder (reminder operations)
+- task → task (task management)
+- guide → guide (help and assistance)
+- expert → expert (advice and strategy)
+- chat → general (general conversation)
+
+Available agents in orchestrator: general, task, reminder, information, guide, expert, coder, audit, silent_mode, context, preference, action, help, silent
 
 Return only classification data, no user-facing messages.
 
@@ -76,7 +87,18 @@ Return JSON with:
     "assumptions": {{}}
 }}
 
-Available agents: general, task, reminder, information, help, guide, expert, coder, audit, silent_mode, context, preference, action, silent
+CLASSIFICATION TO AGENT MAPPING:
+- memory → context
+- silent → silent_mode
+- journal → information
+- ai_action → task
+- reminder → reminder
+- task → task
+- guide → guide
+- expert → expert
+- chat → general
+
+Available agents in orchestrator: general, task, reminder, information, guide, expert, coder, audit, silent_mode, context, preference, action, help, silent
 """
       
             # Make AI call (synchronous)
