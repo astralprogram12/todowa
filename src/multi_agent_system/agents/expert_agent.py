@@ -3,15 +3,16 @@ import database_personal as database
 import os
 
 class ExpertAgent(BaseAgent):
-    """Agent for expert consultation without technical leaks."""
-    
     def __init__(self, supabase, ai_model):
         super().__init__(supabase, ai_model, agent_name="ExpertAgent")
+        self.agent_type = "expert"
         self.comprehensive_prompts = {}
 
     def load_comprehensive_prompts(self):
+        """Loads all prompts relative to the project's structure."""
         try:
             prompts_dict = {}
+            # Use relative pathing to avoid hardcoded paths
             project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
             v1_dir = os.path.join(project_root, "prompts", "v1")
             
@@ -22,6 +23,8 @@ class ExpertAgent(BaseAgent):
                         file_path = os.path.join(v1_dir, file_name)
                         with open(file_path, 'r', encoding='utf-8') as f:
                             prompts_dict[prompt_name] = f.read()
+            else:
+                print(f"WARNING: Prompts directory not found at {v1_dir}")
 
             self.comprehensive_prompts = {
                 'core_system': self._build_expert_system_prompt(prompts_dict)
@@ -32,58 +35,59 @@ class ExpertAgent(BaseAgent):
             return {}
     
     def _build_expert_system_prompt(self, prompts_dict):
-        core_identity = prompts_dict.get('00_core_identity', 'You are a knowledgeable expert advisor.')
+        """Builds the system prompt for the Expert agent."""
+        core_identity = prompts_dict.get('00_core_identity', 'You are a helpful expert advisor.')
         ai_interactions = prompts_dict.get('04_ai_interactions', '')
-        leak_prevention = """
-        
-CRITICAL: Provide expert advice naturally. Never include:
-- System details, technical information, or internal processes
-- JSON, debugging info, or technical formatting
-- References to agents, databases, or system architecture
-
-Respond like a knowledgeable expert consultant.
-        """
-        return f"{core_identity}\n\n{ai_interactions}{leak_prevention}"
+        return f"{core_identity}\n\n{ai_interactions}"
 
     async def process(self, user_input, context, routing_info=None):
+        """Process expert consultation requests."""
         try:
+            # Load comprehensive prompts
             if not self.comprehensive_prompts:
                 self.load_comprehensive_prompts()
             
-            system_prompt = self.comprehensive_prompts.get('core_system', 'You are a knowledgeable expert advisor.')
+            assumptions = routing_info.get('assumptions', {}) if routing_info else {}
+            
+            system_prompt = self.comprehensive_prompts.get('core_system', "You are a helpful expert advisor.")
             
             user_prompt = f"""
-User seeks expert advice: {user_input}
+User Input: {user_input}
+Context: {context}
+Routing Info: {routing_info}
 
-Provide knowledgeable, expert-level guidance. Be authoritative but approachable.
-Do not include any technical details or system information.
+Process this expert consultation request following all prompt guidelines.
 """
             
-            # Make AI call (synchronous)
+            # FIXED: Remove await from synchronous AI call
             response = self.ai_model.generate_content([system_prompt, user_prompt])
             response_text = response.text
             
-            # Clean the response to prevent leaks
-            clean_message = self._clean_response(response_text)
-            
-            # Log action (internal only)
+            # Log the expert consultation
             user_id = context.get('user_id')
             if user_id:
-                self._log_action(
+                # FIXED: Use approved action_type and entity_type for database constraints
+                database.log_action(
+                    supabase=self.supabase,
                     user_id=user_id,
-                    action_type="expert_interaction",
-                    entity_type="system",
-                    action_details={"type": "expert_consultation"},
+                    action_type="expert_interaction",  # Use approved database action_type
+                    entity_type="system",              # Use approved database entity_type
+                    action_details={
+                        "expertise_area": assumptions.get('expertise_area', 'general')
+                    },
                     success_status=True
                 )
             
-            # Return ONLY clean user message
+            # CRITICAL: Always return a message
             return {
-                "message": clean_message
+                "message": response_text,
+                "actions": ["expert_consultation_processed"]
             }
             
         except Exception as e:
-            print(f"ERROR in ExpertAgent: {e}")
+            # CRITICAL: Always return a message, never empty dict
             return {
-                "message": "I'd be happy to share my expertise on this topic. What specific area would you like expert advice on?"
+                "message": "I encountered an error while processing the expert consultation. Please try again.",
+                "actions": ["expert_error"],
+                "error": str(e)
             }

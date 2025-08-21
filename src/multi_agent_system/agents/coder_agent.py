@@ -3,15 +3,16 @@ import database_personal as database
 import os
 
 class CoderAgent(BaseAgent):
-    """Agent for coding assistance without technical leaks."""
-    
     def __init__(self, supabase, ai_model):
         super().__init__(supabase, ai_model, agent_name="CoderAgent")
+        self.agent_type = "coder"
         self.comprehensive_prompts = {}
 
     def load_comprehensive_prompts(self):
+        """Loads all prompts relative to the project's structure."""
         try:
             prompts_dict = {}
+            # Use relative pathing to avoid hardcoded paths
             project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
             v1_dir = os.path.join(project_root, "prompts", "v1")
             
@@ -22,6 +23,8 @@ class CoderAgent(BaseAgent):
                         file_path = os.path.join(v1_dir, file_name)
                         with open(file_path, 'r', encoding='utf-8') as f:
                             prompts_dict[prompt_name] = f.read()
+            else:
+                print(f"WARNING: Prompts directory not found at {v1_dir}")
 
             self.comprehensive_prompts = {
                 'core_system': self._build_coder_system_prompt(prompts_dict)
@@ -32,68 +35,59 @@ class CoderAgent(BaseAgent):
             return {}
     
     def _build_coder_system_prompt(self, prompts_dict):
+        """Builds the system prompt for the Coder agent."""
         core_identity = prompts_dict.get('00_core_identity', 'You are a helpful coding assistant.')
         ai_interactions = prompts_dict.get('04_ai_interactions', '')
-        leak_prevention = """
-        
-CRITICAL: Provide coding help naturally. Never include:
-- System details, technical information about internal processes
-- JSON, debugging info, or internal technical formatting
-- References to agents, databases, or system architecture
-
-Respond like a helpful programming mentor. Code examples are fine, but no system internals.
-        """
-        return f"{core_identity}\n\n{ai_interactions}{leak_prevention}"
+        return f"{core_identity}\n\n{ai_interactions}"
 
     async def process(self, user_input, context, routing_info=None):
+        """Process coding and development requests."""
         try:
+            # Load comprehensive prompts
             if not self.comprehensive_prompts:
                 self.load_comprehensive_prompts()
             
-            system_prompt = self.comprehensive_prompts.get('core_system', 'You are a helpful coding assistant.')
+            assumptions = routing_info.get('assumptions', {}) if routing_info else {}
+            
+            system_prompt = self.comprehensive_prompts.get('core_system', "You are a helpful coding assistant.")
             
             user_prompt = f"""
-User needs coding help: {user_input}
+User Input: {user_input}
+Context: {context}
+Routing Info: {routing_info}
 
-Provide helpful programming assistance. Use code examples when helpful.
-Do not include any system internals or technical architecture details.
+Process this coding request following all prompt guidelines.
 """
             
-            # Make AI call (synchronous)
+            # FIXED: Remove await from synchronous AI call
             response = self.ai_model.generate_content([system_prompt, user_prompt])
             response_text = response.text
             
-            # For coding, we want to preserve code blocks but remove system details
-            # Don't over-clean code examples
-            clean_message = response_text
-            
-            # Only remove obvious system leaks, preserve legitimate code
-            import re
-            clean_message = re.sub(r'"actions":\s*\[[^\]]*\]', '', clean_message)
-            clean_message = re.sub(r'"status":\s*"[^"]*"', '', clean_message)
-            clean_message = ' '.join(clean_message.split())
-            
-            if not clean_message.strip():
-                clean_message = "I'd be happy to help with your coding question! Could you provide more details about what you're working on?"
-            
-            # Log action (internal only)
+            # Log the coding action
             user_id = context.get('user_id')
             if user_id:
-                self._log_action(
+                # FIXED: Use approved action_type and entity_type for database constraints
+                database.log_action(
+                    supabase=self.supabase,
                     user_id=user_id,
-                    action_type="chat_interaction",
-                    entity_type="system",
-                    action_details={"type": "coding_assistance"},
+                    action_type="chat_interaction",  # Use approved database action_type
+                    entity_type="system",           # Use approved database entity_type
+                    action_details={
+                        "coding_type": assumptions.get('coding_type', 'general')
+                    },
                     success_status=True
                 )
             
-            # Return ONLY clean user message
+            # CRITICAL: Always return a message
             return {
-                "message": clean_message
+                "message": response_text,
+                "actions": ["coding_processed"]
             }
             
         except Exception as e:
-            print(f"ERROR in CoderAgent: {e}")
+            # CRITICAL: Always return a message, never empty dict
             return {
-                "message": "I'd be happy to help with your coding question! What programming challenge are you working on?"
+                "message": "I encountered an error while processing the coding request. Please try again.",
+                "actions": ["coding_error"],
+                "error": str(e)
             }

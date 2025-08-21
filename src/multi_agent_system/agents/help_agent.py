@@ -3,15 +3,16 @@ import database_personal as database
 import os
 
 class HelpAgent(BaseAgent):
-    """Agent for providing help without technical leaks."""
-    
     def __init__(self, supabase, ai_model):
         super().__init__(supabase, ai_model, agent_name="HelpAgent")
+        self.agent_type = "help"
         self.comprehensive_prompts = {}
 
     def load_comprehensive_prompts(self):
+        """Loads all prompts relative to the project's structure."""
         try:
             prompts_dict = {}
+            # Use relative pathing to avoid hardcoded paths
             project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
             v1_dir = os.path.join(project_root, "prompts", "v1")
             
@@ -22,6 +23,8 @@ class HelpAgent(BaseAgent):
                         file_path = os.path.join(v1_dir, file_name)
                         with open(file_path, 'r', encoding='utf-8') as f:
                             prompts_dict[prompt_name] = f.read()
+            else:
+                print(f"WARNING: Prompts directory not found at {v1_dir}")
 
             self.comprehensive_prompts = {
                 'core_system': self._build_help_system_prompt(prompts_dict)
@@ -32,58 +35,79 @@ class HelpAgent(BaseAgent):
             return {}
     
     def _build_help_system_prompt(self, prompts_dict):
-        core_identity = prompts_dict.get('00_core_identity', 'You are a helpful support assistant.')
+        """Builds the system prompt for the Help agent."""
+        core_identity = prompts_dict.get('00_core_identity', 'You are a helpful support agent.')
         ai_interactions = prompts_dict.get('04_ai_interactions', '')
-        leak_prevention = """
-        
-CRITICAL: Provide help naturally. Never include:
-- System details, technical information, or internal processes
-- JSON, debugging info, or technical formatting
-- References to agents, databases, or system architecture
-
-Respond like a friendly customer service representative.
-        """
-        return f"{core_identity}\n\n{ai_interactions}{leak_prevention}"
+        return f"{core_identity}\n\n{ai_interactions}"
 
     async def process(self, user_input, context, routing_info=None):
+        """
+        Process help and support requests.
+        routing_info contains assumptions and confidence from IntentClassifierAgent.
+        """
         try:
+            # Use routing_info assumptions if available
+            assumptions = routing_info.get('assumptions', {}) if routing_info else {}
+            
+            # Load comprehensive prompts
             if not self.comprehensive_prompts:
                 self.load_comprehensive_prompts()
             
-            system_prompt = self.comprehensive_prompts.get('core_system', 'You are a helpful support assistant.')
+            system_prompt = self.comprehensive_prompts.get('core_system', "You are a helpful support agent.")
             
+            # Add routing info to context if available
+            enhanced_context = context.copy()
+            if routing_info:
+                enhanced_context['routing_info'] = routing_info
+                enhanced_context['intent_assumptions'] = assumptions
+            
+            # Determine help type and provide appropriate assistance
             user_prompt = f"""
-User needs help: {user_input}
+User Input: {user_input}
+Context: {enhanced_context}
 
-Provide clear, helpful assistance. Be supportive and solution-focused.
-Do not include any technical details or system information.
+This is a help request. Provide clear, actionable help information.
 """
-            
-            # Make AI call (synchronous)
+
+            # FIXED: Remove await from synchronous AI call
             response = self.ai_model.generate_content([system_prompt, user_prompt])
             response_text = response.text
             
-            # Clean the response to prevent leaks
-            clean_message = self._clean_response(response_text)
+            # Determine help category and provide structured assistance
+            help_category = assumptions.get('help_category', 'general')
             
-            # Log action (internal only)
+            # Log the help request
             user_id = context.get('user_id')
             if user_id:
-                self._log_action(
+                # FIXED: Use approved action_type and entity_type for database constraints
+                database.log_action(
+                    supabase=self.supabase,
                     user_id=user_id,
-                    action_type="chat_interaction",
-                    entity_type="system",
-                    action_details={"type": "help_request"},
+                    action_type="chat_interaction",  # Use approved database action_type
+                    entity_type="system",           # Use approved database entity_type
+                    action_details={
+                        "help_category": help_category,
+                        "feature": assumptions.get('feature'),
+                        "problem_type": assumptions.get('problem_type')
+                    },
                     success_status=True
                 )
             
-            # Return ONLY clean user message
+            # CRITICAL: Always return a message
             return {
-                "message": clean_message
+                "message": response_text,
+                "actions": ["help_provided"],
+                "data": {
+                    "help_category": help_category,
+                    "feature": assumptions.get('feature'),
+                    "problem_type": assumptions.get('problem_type')
+                }
             }
             
         except Exception as e:
-            print(f"ERROR in HelpAgent: {e}")
+            # CRITICAL: Always return a message, never empty dict
             return {
-                "message": "I'm here to help! Please let me know what specific assistance you need and I'll do my best to guide you."
+                "message": "I'm here to help! Please let me know what specific assistance you need and I'll do my best to guide you.",
+                "actions": ["help_error"],
+                "error": str(e)
             }

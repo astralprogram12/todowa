@@ -3,15 +3,16 @@ import database_personal as database
 import os
 
 class PreferenceAgent(BaseAgent):
-    """Agent for preference management without technical leaks."""
-    
     def __init__(self, supabase, ai_model):
         super().__init__(supabase, ai_model, agent_name="PreferenceAgent")
+        self.agent_type = "preference"
         self.comprehensive_prompts = {}
 
     def load_comprehensive_prompts(self):
+        """Loads all prompts relative to the project's structure."""
         try:
             prompts_dict = {}
+            # Use relative pathing to avoid hardcoded paths
             project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
             v1_dir = os.path.join(project_root, "prompts", "v1")
             
@@ -22,6 +23,8 @@ class PreferenceAgent(BaseAgent):
                         file_path = os.path.join(v1_dir, file_name)
                         with open(file_path, 'r', encoding='utf-8') as f:
                             prompts_dict[prompt_name] = f.read()
+            else:
+                print(f"WARNING: Prompts directory not found at {v1_dir}")
 
             self.comprehensive_prompts = {
                 'core_system': self._build_preference_system_prompt(prompts_dict)
@@ -32,58 +35,59 @@ class PreferenceAgent(BaseAgent):
             return {}
     
     def _build_preference_system_prompt(self, prompts_dict):
-        core_identity = prompts_dict.get('00_core_identity', 'You are a helpful assistant for managing preferences.')
+        """Builds the system prompt for the Preference agent."""
+        core_identity = prompts_dict.get('00_core_identity', 'You are a helpful preference manager.')
         context_memory = prompts_dict.get('03_context_memory', '')
-        leak_prevention = """
-        
-CRITICAL: Help with preferences naturally. Never include:
-- System details, technical information, or internal processes
-- JSON, debugging info, or technical formatting
-- References to agents, databases, or system architecture
-
-Respond like a personal assistant managing user preferences.
-        """
-        return f"{core_identity}\n\n{context_memory}{leak_prevention}"
+        return f"{core_identity}\n\n{context_memory}"
 
     async def process(self, user_input, context, routing_info=None):
+        """Process user preference requests."""
         try:
+            # Load comprehensive prompts
             if not self.comprehensive_prompts:
                 self.load_comprehensive_prompts()
             
-            system_prompt = self.comprehensive_prompts.get('core_system', 'You are a helpful assistant for managing preferences.')
+            assumptions = routing_info.get('assumptions', {}) if routing_info else {}
+            
+            system_prompt = self.comprehensive_prompts.get('core_system', "You are a helpful preference manager.")
             
             user_prompt = f"""
-User wants to manage their preferences: {user_input}
+User Input: {user_input}
+Context: {context}
+Routing Info: {routing_info}
 
-Help them with their settings and preferences. Be helpful and accommodating.
-Do not include any technical details or system information.
+Process this preference request following all prompt guidelines.
 """
             
-            # Make AI call (synchronous)
+            # FIXED: Remove await from synchronous AI call
             response = self.ai_model.generate_content([system_prompt, user_prompt])
             response_text = response.text
             
-            # Clean the response to prevent leaks
-            clean_message = self._clean_response(response_text)
-            
-            # Log action (internal only)
+            # Log the preference action
             user_id = context.get('user_id')
             if user_id:
-                self._log_action(
+                # FIXED: Use approved action_type and entity_type for database constraints
+                database.log_action(
+                    supabase=self.supabase,
                     user_id=user_id,
-                    action_type="user_profile_update",
-                    entity_type="system",
-                    action_details={"type": "preference_management"},
+                    action_type="user_profile_update",  # Use approved database action_type
+                    entity_type="system",               # Use approved database entity_type
+                    action_details={
+                        "preference_type": assumptions.get('preference_type', 'general')
+                    },
                     success_status=True
                 )
             
-            # Return ONLY clean user message
+            # CRITICAL: Always return a message
             return {
-                "message": clean_message
+                "message": response_text,
+                "actions": ["preference_processed"]
             }
             
         except Exception as e:
-            print(f"ERROR in PreferenceAgent: {e}")
+            # CRITICAL: Always return a message, never empty dict
             return {
-                "message": "I'd be happy to help you adjust your preferences. What settings would you like to change?"
+                "message": "I encountered an error while processing the preference request. Please try again.",
+                "actions": ["preference_error"],
+                "error": str(e)
             }
