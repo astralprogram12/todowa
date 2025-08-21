@@ -1,9 +1,12 @@
 from .base_agent import BaseAgent
+import database_personal  # Fix #4: Proper database import
+import os
 
 class PreferenceAgent(BaseAgent):
-    def __init__(self, supabase, ai_model):
+    def __init__(self, supabase, ai_model):  # Fix #1: Correct constructor
         super().__init__(supabase, ai_model, agent_name="PreferenceAgent")
         self.agent_type = "preference"
+        self.comprehensive_prompts = {}
 
     async def process(self, user_input, context, routing_info=None):
         """
@@ -14,20 +17,11 @@ class PreferenceAgent(BaseAgent):
             # Use routing_info assumptions if available
             assumptions = routing_info.get('assumptions', {}) if routing_info else {}
             
-            # Load prompts
-            prompt_files = [
-                "01_main_system_prompt.md",
-                "02_preference_agent_specific.md",
-                "03_context_understanding.md",
-                "04_response_formatting.md",
-                "05_datetime_handling.md",
-                "06_error_handling.md",
-                "07_conversation_flow.md",
-                "08_whatsapp_integration.md",
-                "09_intelligent_decision_tree.md"
-            ]
+            # Load comprehensive prompts
+            if not self.comprehensive_prompts:
+                self.load_comprehensive_prompts()
             
-            system_prompt = self.load_prompts(prompt_files)
+            system_prompt = self.comprehensive_prompts.get('core_system', "You are a helpful preferences agent.")
             
             # Add routing info to context if available
             enhanced_context = context.copy()
@@ -57,13 +51,15 @@ Incorporate these assumptions confidently.
 Provide appropriate response and indicate what actions should be taken.
 """
 
-            response = self.ai_model.generate_content(
+            # Fix #2: Correct AI model call with array parameter
+            response = self.ai_model.generate_content([
                 system_prompt, user_prompt
-            )
+            ])
+            response_text = response.text
             
             # Parse and handle the preference request
             preference_result = await self._handle_preference_request(
-                response, user_input, enhanced_context, assumptions
+                response_text, user_input, enhanced_context, assumptions
             )
             
             return preference_result
@@ -75,159 +71,265 @@ Provide appropriate response and indicate what actions should be taken.
                 "error": str(e)
             }
 
+    def load_comprehensive_prompts(self):
+        """Load ALL prompts from the prompts/v1/ directory and requirements."""
+        try:
+            prompts_dict = {}
+            
+            # Load all prompts from v1 directory
+            v1_dir = "/workspace/user_input_files/todowa/prompts/v1"
+            if os.path.exists(v1_dir):
+                for file_name in os.listdir(v1_dir):
+                    if file_name.endswith('.md'):
+                        prompt_name = file_name.replace('.md', '')
+                        file_path = os.path.join(v1_dir, file_name)
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            prompts_dict[prompt_name] = f.read()
+            
+            # Load requirements
+            requirements_path = "/workspace/user_input_files/99_requirements.md"
+            if os.path.exists(requirements_path):
+                with open(requirements_path, 'r', encoding='utf-8') as f:
+                    prompts_dict['requirements'] = f.read()
+            
+            # Create comprehensive system prompt for preference agent
+            self.comprehensive_prompts = {
+                'core_system': self._build_preference_system_prompt(prompts_dict),
+                'core_identity': prompts_dict.get('00_core_identity', ''),
+                'templates': prompts_dict.get('08_templates', ''),
+                'context_memory': prompts_dict.get('03_context_memory', ''),
+                'requirements': prompts_dict.get('requirements', ''),
+                'all_prompts': prompts_dict
+            }
+            
+            return self.comprehensive_prompts
+        except Exception as e:
+            print(f"Error loading comprehensive prompts: {e}")
+            return {}
+    
+    def _build_preference_system_prompt(self, prompts_dict):
+        """Build comprehensive system prompt for preference agent."""
+        core_identity = prompts_dict.get('00_core_identity', '')
+        templates = prompts_dict.get('08_templates', '')
+        context_memory = prompts_dict.get('03_context_memory', '')
+        requirements = prompts_dict.get('requirements', '')
+        
+        return f"""{core_identity}
+
+## PREFERENCE AGENT SPECIALIZATION
+You are specifically focused on user preference management:
+- Setting and updating user preferences and settings
+- Managing notification preferences and communication settings
+- Handling personal information and configuration updates
+- Providing preference status and current settings information
+- Ensuring user preferences are properly stored and applied
+
+{templates}
+
+{context_memory}
+
+## REQUIREMENTS COMPLIANCE
+{requirements}
+
+## PREFERENCE AGENT BEHAVIOR
+- ALWAYS respect user privacy and preference choices
+- Use structured templates for preference confirmations
+- Apply context memory for preference history tracking
+- Follow comprehensive prompt system for enhanced preference management"""
+
     async def _handle_preference_request(self, ai_response, original_input, context, assumptions):
         """Handle the specific preference request based on AI analysis"""
         try:
-            preference_type = assumptions.get('preference_type', 'general')
-            action = assumptions.get('action', 'unknown')
+            preference_type = assumptions.get('preference_type', self._determine_preference_type(original_input))
+            action = assumptions.get('action', self._determine_action(original_input))
+            user_id = context.get('user_id')
             
-            if action in ['set', 'update', 'change']:
-                return await self._set_preference(preference_type, ai_response, context)
-            elif action in ['get', 'view', 'show']:
-                return await self._get_preference(preference_type, context)
-            elif action in ['delete', 'remove', 'clear']:
-                return await self._delete_preference(preference_type, context)
+            if action == 'get':
+                return await self._get_preferences(user_id, preference_type, context)
+            elif action == 'set':
+                return await self._set_preferences(user_id, preference_type, original_input, context)
+            elif action == 'update':
+                return await self._update_preferences(user_id, preference_type, original_input, context)
             else:
-                # Default to showing current preferences and asking for clarification
-                current_prefs = await self._get_all_preferences(context)
                 return {
-                    "message": f"{ai_response}\n\nYour current preferences:\n{self._format_preferences(current_prefs)}",
-                    "actions": ["preference_info_shown"],
-                    "data": {"preferences": current_prefs}
-                }
-                
-        except Exception as e:
-            return {
-                "message": "I couldn't process your preference request. Please try being more specific.",
-                "actions": ["preference_failed"],
-                "error": str(e)
-            }
-
-    async def _set_preference(self, preference_type, ai_response, context):
-        """Set or update a user preference"""
-        try:
-            user_id = context.get('user_id')
-            if not user_id:
-                return {
-                    "message": "I need to identify you to save your preferences.",
-                    "actions": ["preference_auth_required"]
-                }
-            
-            # Extract preference data from AI response
-            preference_data = await self._extract_preference_data(ai_response, preference_type)
-            
-            if preference_data:
-                # Save to database
-                result = await self.supabase_manager.upsert_record(
-                    'user_preferences',
-                    {'user_id': user_id, **preference_data},
-                    ['user_id', 'preference_type']
-                )
-                
-                if result:
-                    return {
-                        "message": f"✅ {preference_type.title()} preference updated successfully!",
-                        "actions": ["preference_updated"],
-                        "data": preference_data
+                    "message": ai_response,
+                    "actions": ["preference_analyzed"],
+                    "data": {
+                        "preference_type": preference_type,
+                        "action": action
                     }
-            
-            return {
-                "message": "I couldn't understand what preference you want to set. Could you be more specific?",
-                "actions": ["preference_clarification_needed"]
-            }
-            
+                }
+                
         except Exception as e:
             return {
-                "message": f"Failed to save preference: {str(e)}",
-                "actions": ["preference_save_failed"],
+                "message": f"Error handling preference request: {str(e)}",
+                "actions": ["preference_error"],
                 "error": str(e)
             }
 
-    async def _get_preference(self, preference_type, context):
-        """Retrieve specific user preference"""
+    def _determine_preference_type(self, user_input):
+        """Determine the preference type from user input"""
+        user_input_lower = user_input.lower()
+        
+        if any(word in user_input_lower for word in ['notification', 'notify', 'alert']):
+            return 'notifications'
+        elif any(word in user_input_lower for word in ['timezone', 'time zone', 'time']):
+            return 'timezone'
+        elif any(word in user_input_lower for word in ['language', 'lang']):
+            return 'language'
+        elif any(word in user_input_lower for word in ['location', 'address']):
+            return 'location'
+        else:
+            return 'general'
+
+    def _determine_action(self, user_input):
+        """Determine the action from user input"""
+        user_input_lower = user_input.lower()
+        
+        if any(word in user_input_lower for word in ['show', 'get', 'view', 'what']):
+            return 'get'
+        elif any(word in user_input_lower for word in ['set', 'change', 'update', 'modify']):
+            return 'set'
+        else:
+            return 'get'
+
+    async def _get_preferences(self, user_id, preference_type, context):
+        """Get user preferences"""
         try:
-            user_id = context.get('user_id')
-            preferences = await self.supabase_manager.get_records(
-                'user_preferences',
-                filters={'user_id': user_id, 'preference_type': preference_type}
+            # Get preferences using correct database function
+            preferences = database_personal.get_user_preferences(
+                supabase=self.supabase,
+                user_id=user_id,
+                preference_type=preference_type
             )
             
             if preferences:
-                pref_data = preferences[0]
                 return {
-                    "message": f"Your {preference_type} preference: {self._format_single_preference(pref_data)}",
-                    "actions": ["preference_retrieved"],
-                    "data": pref_data
+                    "message": f"Here are your {preference_type} preferences:",
+                    "preferences": preferences,
+                    "actions": ["preferences_retrieved"]
                 }
             else:
                 return {
-                    "message": f"You haven't set any {preference_type} preferences yet.",
-                    "actions": ["preference_not_found"]
+                    "message": f"No {preference_type} preferences found. Would you like to set some?",
+                    "actions": ["no_preferences_found"]
                 }
                 
         except Exception as e:
             return {
-                "message": f"Error retrieving preference: {str(e)}",
-                "actions": ["preference_retrieval_failed"],
+                "message": f"Error retrieving preferences: {str(e)}",
                 "error": str(e)
             }
 
-    async def _delete_preference(self, preference_type, context):
-        """Delete a user preference"""
+    async def _set_preferences(self, user_id, preference_type, user_input, context):
+        """Set user preferences"""
         try:
-            user_id = context.get('user_id')
-            result = await self.supabase_manager.delete_records(
-                'user_preferences',
-                filters={'user_id': user_id, 'preference_type': preference_type}
+            # Extract preference values from user input
+            preference_values = self._extract_preference_values(user_input, preference_type)
+            
+            # Set preferences using correct database function
+            result = database_personal.set_user_preferences(
+                supabase=self.supabase,
+                user_id=user_id,
+                preference_type=preference_type,
+                values=preference_values
             )
             
-            return {
-                "message": f"✅ {preference_type.title()} preference deleted successfully!",
-                "actions": ["preference_deleted"],
-                "data": {"deleted_type": preference_type}
-            }
-            
+            if result:
+                # Log the preference change
+                database_personal.log_action(
+                    supabase=self.supabase,
+                    user_id=user_id,
+                    action_type="preferences_updated",
+                    entity_type="preferences",
+                    action_details={
+                        "preference_type": preference_type,
+                        "values": preference_values
+                    },
+                    success_status=True
+                )
+                
+                return {
+                    "message": f"Your {preference_type} preferences have been updated successfully!",
+                    "updated_preferences": preference_values,
+                    "actions": ["preferences_updated"]
+                }
+            else:
+                return {
+                    "message": "Failed to update preferences. Please try again.",
+                    "actions": ["preferences_update_failed"]
+                }
+                
         except Exception as e:
             return {
-                "message": f"Error deleting preference: {str(e)}",
-                "actions": ["preference_deletion_failed"],
+                "message": f"Error setting preferences: {str(e)}",
                 "error": str(e)
             }
 
-    async def _get_all_preferences(self, context):
-        """Get all user preferences"""
-        try:
-            user_id = context.get('user_id')
-            if user_id:
-                return await self.supabase_manager.get_records(
-                    'user_preferences',
-                    filters={'user_id': user_id}
-                )
-            return []
-        except:
-            return []
+    async def _update_preferences(self, user_id, preference_type, user_input, context):
+        """Update existing preferences"""
+        # For now, treat update the same as set
+        return await self._set_preferences(user_id, preference_type, user_input, context)
 
-    async def _extract_preference_data(self, ai_response, preference_type):
-        """Extract structured preference data from AI response"""
-        # This would contain logic to parse the AI response and extract
-        # the actual preference values to store
-        return {
-            "preference_type": preference_type,
-            "value": ai_response,  # Simplified - would need proper parsing
-            "updated_at": "now()"
+    def _extract_preference_values(self, user_input, preference_type):
+        """Extract preference values from user input"""
+        if preference_type == 'notifications':
+            return self._extract_notification_preferences(user_input)
+        elif preference_type == 'timezone':
+            return self._extract_timezone_preference(user_input)
+        elif preference_type == 'language':
+            return self._extract_language_preference(user_input)
+        elif preference_type == 'location':
+            return self._extract_location_preference(user_input)
+        else:
+            return {"raw_input": user_input}
+
+    def _extract_notification_preferences(self, user_input):
+        """Extract notification preferences"""
+        preferences = {}
+        user_input_lower = user_input.lower()
+        
+        if 'enable' in user_input_lower or 'on' in user_input_lower:
+            preferences['enabled'] = True
+        elif 'disable' in user_input_lower or 'off' in user_input_lower:
+            preferences['enabled'] = False
+            
+        if 'morning' in user_input_lower:
+            preferences['morning_notifications'] = True
+        if 'evening' in user_input_lower:
+            preferences['evening_notifications'] = True
+            
+        return preferences
+
+    def _extract_timezone_preference(self, user_input):
+        """Extract timezone preference"""
+        import re
+        # Simple timezone extraction
+        timezone_match = re.search(r'(UTC[+-]\d{1,2}|[A-Z]{3,4})', user_input.upper())
+        if timezone_match:
+            return {"timezone": timezone_match.group(1)}
+        else:
+            return {"timezone": "UTC"}
+
+    def _extract_language_preference(self, user_input):
+        """Extract language preference"""
+        languages = {
+            'english': 'en',
+            'spanish': 'es',
+            'french': 'fr',
+            'german': 'de',
+            'italian': 'it',
+            'portuguese': 'pt'
         }
-
-    def _format_preferences(self, preferences):
-        """Format preferences list for display"""
-        if not preferences:
-            return "No preferences set."
         
-        formatted = []
-        for pref in preferences:
-            formatted.append(f"• {pref.get('preference_type', 'Unknown')}: {pref.get('value', 'Not set')}")
+        user_input_lower = user_input.lower()
+        for lang_name, lang_code in languages.items():
+            if lang_name in user_input_lower:
+                return {"language": lang_code}
         
-        return "\n".join(formatted)
+        return {"language": "en"}  # Default to English
 
-    def _format_single_preference(self, preference):
-        """Format single preference for display"""
-        return preference.get('value', 'Not set')
+    def _extract_location_preference(self, user_input):
+        """Extract location preference"""
+        # Simple location extraction - in real implementation would use more sophisticated parsing
+        return {"location": user_input}
