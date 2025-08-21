@@ -1,19 +1,19 @@
 from .base_agent import BaseAgent
-import database_personal as database  # Step 1: Fix the imports
+import database_personal as database
 import os
 
 class ReminderAgent(BaseAgent):
     """Agent for handling reminder-related operations."""
     
-    def __init__(self, supabase, ai_model):  # Step 2: Fix constructor
+    def __init__(self, supabase, ai_model):
         super().__init__(supabase, ai_model, agent_name="ReminderAgent")
         self.comprehensive_prompts = {}
     
-    def load_comprehensive_prompts(self):  # Step 3: Fix prompt loading logic
+    def load_comprehensive_prompts(self):
         """Loads all prompts relative to the project's structure."""
         try:
             prompts_dict = {}
-            # This code correctly finds your prompts folder
+            # Use relative pathing to avoid hardcoded paths
             project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
             v1_dir = os.path.join(project_root, "prompts", "v1")
             
@@ -27,7 +27,6 @@ class ReminderAgent(BaseAgent):
             else:
                 print(f"WARNING: Prompts directory not found at {v1_dir}")
 
-            # This part can be customized for each agent
             self.comprehensive_prompts = {
                 'core_system': self._build_reminder_system_prompt(prompts_dict)
             }
@@ -36,7 +35,7 @@ class ReminderAgent(BaseAgent):
             print(f"Error loading comprehensive prompts: {e}")
             return {}
     
-    def _build_reminder_system_prompt(self, prompts_dict):  # Customize this helper for each agent
+    def _build_reminder_system_prompt(self, prompts_dict):
         """Builds the system prompt for the Reminder agent."""
         core_identity = prompts_dict.get('00_core_identity', 'You are a helpful reminder manager.')
         time_handling = prompts_dict.get('06_time_handling', '')
@@ -57,7 +56,7 @@ class ReminderAgent(BaseAgent):
         
         # Load comprehensive prompts
         if not self.comprehensive_prompts:
-            self.load_comprehensive_prompts()  # NO 'await' here
+            self.load_comprehensive_prompts()
         
         # NEW: Apply AI assumptions to enhance processing
         enhanced_context = self._apply_ai_assumptions(context, routing_info)
@@ -79,6 +78,7 @@ class ReminderAgent(BaseAgent):
         elif operation == 'list':
             return await self._list_reminders(user_id, user_input, context)
         else:
+            # CRITICAL: Always return a message, never empty dict
             return {
                 "status": "error",
                 "message": "I'm not sure what reminder operation you want to perform. Please try again with a clearer request."
@@ -132,8 +132,8 @@ Set up a reminder based on this input. The AI has provided these assumptions:
 Generate an appropriate response and reminder creation plan.
 """
         
-        # Step 4: Fix AI model call with await
-        response = await self.ai_model.generate_content([system_prompt, user_prompt])
+        # FIXED: Remove await from synchronous AI call
+        response = self.ai_model.generate_content([system_prompt, user_prompt])
         response_text = response.text
         
         # Create the reminder (and auto-create task if needed)
@@ -203,7 +203,7 @@ Generate an appropriate response and reminder creation plan.
     async def _create_reminder_with_details(self, user_id, reminder_text, reminder_time, reminder_type):
         """Create a reminder with detailed information"""
         try:
-            # Step 5: Use the correct database function to create a reminder
+            # FIXED: Use the correct database function to create a reminder
             reminder_data = database.add_reminder_entry(
                 supabase=self.supabase,
                 user_id=user_id,

@@ -1,19 +1,19 @@
 from .base_agent import BaseAgent
-import database_personal as database  # Step 1: Fix the imports
+import database_personal as database
 import os
 
 class TaskAgent(BaseAgent):
     """Agent for handling task-related operations with AI-enhanced processing."""
     
-    def __init__(self, supabase, ai_model):  # Step 2: Fix constructor
+    def __init__(self, supabase, ai_model):
         super().__init__(supabase, ai_model, agent_name="TaskAgent")
         self.comprehensive_prompts = {}
     
-    def load_comprehensive_prompts(self):  # Step 3: Fix prompt loading logic
+    def load_comprehensive_prompts(self):
         """Loads all prompts relative to the project's structure."""
         try:
             prompts_dict = {}
-            # This code correctly finds your prompts folder
+            # Use relative pathing to avoid hardcoded paths
             project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
             v1_dir = os.path.join(project_root, "prompts", "v1")
             
@@ -27,7 +27,6 @@ class TaskAgent(BaseAgent):
             else:
                 print(f"WARNING: Prompts directory not found at {v1_dir}")
 
-            # This part can be customized for each agent
             self.comprehensive_prompts = {
                 'core_system': self._build_task_system_prompt(prompts_dict)
             }
@@ -36,7 +35,7 @@ class TaskAgent(BaseAgent):
             print(f"Error loading comprehensive prompts: {e}")
             return {}
 
-    def _build_task_system_prompt(self, prompts_dict):  # Customize this helper for each agent
+    def _build_task_system_prompt(self, prompts_dict):
         """Builds the system prompt for the Task agent."""
         core_identity = prompts_dict.get('00_core_identity', 'You are a helpful task manager.')
         task_processing = prompts_dict.get('02_task_processing', '')
@@ -57,7 +56,7 @@ class TaskAgent(BaseAgent):
         
         # Load comprehensive prompts
         if not self.comprehensive_prompts:
-            self.load_comprehensive_prompts()  # NO 'await' here
+            self.load_comprehensive_prompts()
         
         # NEW: Apply AI assumptions to enhance processing
         enhanced_context = self._apply_ai_assumptions(context, routing_info)
@@ -93,8 +92,8 @@ Task Details Extracted:
 Generate a comprehensive response following all prompt guidelines.
 """
         
-        # Step 4: Fix AI model call with await
-        response = await self.ai_model.generate_content([system_prompt, user_prompt])
+        # FIXED: Remove await from synchronous AI call
+        response = self.ai_model.generate_content([system_prompt, user_prompt])
         response_text = response.text
         
         # Create the task if this is a creation request
@@ -110,6 +109,7 @@ Generate a comprehensive response following all prompt guidelines.
                 "actions": [{"agent": self.agent_name, "action": "task_created"}]
             }
         
+        # CRITICAL: Always return a message
         return {
             "status": "success", 
             "message": response_text,
@@ -174,7 +174,7 @@ Generate a comprehensive response following all prompt guidelines.
     async def _create_task_with_details(self, user_id, title, category, priority, due_date):
         """Create a task with detailed information"""
         try:
-            # Step 5: Use the correct database function to create a task
+            # FIXED: Use the correct database function to create a task
             task_data = database.add_task_entry(
                 supabase=self.supabase,
                 user_id=user_id,
