@@ -1,7 +1,7 @@
 from .base_agent import BaseAgent
 import database_personal as database
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 class EnhancedReminderAgent(BaseAgent):
     """Enhanced AI-powered reminder agent with multilingual support and advanced time parsing."""
@@ -14,28 +14,24 @@ class EnhancedReminderAgent(BaseAgent):
     def _initialize_ai_processors(self):
         """Initialize AI processors for translation and time parsing."""
         try:
-            # Import AI processors
+            # Import AI processors with correct class names
             import sys
             current_dir = os.path.dirname(os.path.abspath(__file__))
             processors_path = os.path.join(current_dir, '..', '..', 'ai_text_processors')
             sys.path.insert(0, processors_path)
             
-            from translation_agent import get_translation_agent, translate_to_english
-            from ai_time_parser import get_ai_time_parser, parse_time_with_ai
+            from translation_agent import TranslationAgent
+            from ai_time_parser import AITimeParser
             
-            self.translation_agent = get_translation_agent()
-            self.time_parser = get_ai_time_parser()
-            self.translate_to_english = translate_to_english
-            self.parse_time_with_ai = parse_time_with_ai
+            self.translation_agent = TranslationAgent()
+            self.time_parser = AITimeParser()
             
-            print("AI processors initialized successfully")
+            print("✅ Enhanced Reminder Agent: AI processors initialized successfully")
         except Exception as e:
-            print(f"Warning: Could not initialize AI processors: {e}")
+            print(f"⚠️ Enhanced Reminder Agent: Could not initialize AI processors: {e}")
             # Fallback to None - will be handled gracefully
             self.translation_agent = None
             self.time_parser = None
-            self.translate_to_english = None
-            self.parse_time_with_ai = None
     
     def load_comprehensive_prompts(self):
         try:
@@ -131,7 +127,7 @@ Respond like a helpful personal assistant managing reminders.
                 
             elif is_action_operation:
                 # Handle action operations (create/update/delete reminders)
-                return await self._handle_reminder_action(user_input, user_id, current_time, user_timezone)
+                return await self._handle_reminder_action(user_input, user_id, current_time, user_timezone, context)
                 
             else:
                 # General reminder conversation
@@ -166,156 +162,157 @@ Respond like a helpful personal assistant managing reminders.
             
         return {"message": clean_message}
     
-    async def _handle_reminder_action(self, user_input, user_id, current_time, user_timezone):
+    async def _handle_reminder_action(self, user_input, user_id, current_time, user_timezone, context):
         """Handle reminder creation/update/delete operations using AI parsing."""
         if not user_id:
             return {"message": "I'd need to set up your account first to create reminders."}
         
+        # ✅ CRITICAL FIX: Use the AI-parsed time analysis from orchestrator context
+        time_analysis = context.get('time_analysis', {})
+        
+        print(f"🔍 Enhanced Reminder Agent: Using time analysis from context: {time_analysis}")
+        
+        # Extract time and task from AI analysis
+        has_time = time_analysis.get('has_time_expression', False)
+        parsed_datetime = None
+        task_description = time_analysis.get('task_description', '')
+        confidence = time_analysis.get('confidence', 0.0)
+        
+        if has_time and confidence > 0.5:
+            # Use the AI-parsed datetime
+            parsed_datetime_str = time_analysis.get('parsed_datetime_utc')
+            if parsed_datetime_str:
+                try:
+                    # Parse the ISO format datetime from AI
+                    parsed_datetime = datetime.fromisoformat(parsed_datetime_str.replace('Z', '+00:00'))
+                    print(f"✅ Enhanced Reminder Agent: Using AI-parsed time: {parsed_datetime}")
+                except Exception as e:
+                    print(f"⚠️ Enhanced Reminder Agent: Error parsing AI datetime: {e}")
+                    parsed_datetime = None
+        
+        # Fallback: Extract task description from user input if not found in AI analysis
+        if not task_description:
+            task_description = self._extract_task_description(user_input)
+        
+        # Fallback: Use our own AI time parser if orchestrator analysis failed
+        if not parsed_datetime and self.time_parser:
+            try:
+                print(f"🔄 Enhanced Reminder Agent: Fallback to own AI time parser")
+                fallback_analysis = self.time_parser.parse_time_expression(user_input, current_time)
+                if fallback_analysis.get('has_time_expression') and fallback_analysis.get('confidence', 0) > 0.5:
+                    parsed_datetime_str = fallback_analysis.get('parsed_datetime_utc')
+                    if parsed_datetime_str:
+                        parsed_datetime = datetime.fromisoformat(parsed_datetime_str.replace('Z', '+00:00'))
+                        task_description = fallback_analysis.get('task_description', task_description)
+                        print(f"✅ Enhanced Reminder Agent: Fallback AI parsing successful: {parsed_datetime}")
+            except Exception as e:
+                print(f"⚠️ Enhanced Reminder Agent: Fallback AI parsing error: {e}")
+        
+        # Final fallback: Default time if no parsing worked
+        if not parsed_datetime:
+            print(f"⚠️ Enhanced Reminder Agent: No valid time parsed, using default (15 minutes)")
+            parsed_datetime = current_time + timedelta(minutes=15)
+            task_description = user_input.strip()
+        
+        # Ensure we have a task description
+        if not task_description:
+            task_description = "Reminder"
+        
         try:
-            # Step 1: Translate to English if needed
-            translation_result = self._translate_input(user_input)
-            text_to_parse = translation_result.get('translated_text', user_input)
-            original_language = translation_result.get('detected_language', 'English')
+            # Create the reminder in database
+            task_data = {
+                'title': task_description,
+                'reminder_at': parsed_datetime.isoformat(),
+                'description': f"Reminder: {task_description}",
+                'priority': 'medium',
+                'status': 'pending'
+            }
             
-            # Step 2: Parse time expression using AI
-            time_parsing_result = self._parse_time_with_ai_fallback(text_to_parse, current_time, user_timezone)
+            result = database.create_task_with_reminder(self.supabase, user_id, task_data)
             
-            # Step 3: Extract task description
-            task_description = time_parsing_result.get('task_description', '').strip()
-            if not task_description:
-                task_description = self._extract_task_description(user_input, text_to_parse)
-            
-            # Step 4: Get parsed datetime
-            reminder_time = time_parsing_result.get('parsed_datetime', current_time)
-            confidence = time_parsing_result.get('confidence', 0.5)
-            
-            # Step 5: Create the reminder
-            reminder_time_iso = reminder_time.isoformat().replace('+00:00', 'Z')
-            
-            task_data = database.add_task_entry(
-                supabase=self.supabase,
-                user_id=user_id,
-                title=task_description,
-                category='reminder_based',
-                reminder_at=reminder_time_iso
-            )
-            
-            # Step 6: Generate user-friendly confirmation
-            if task_data:
-                time_description = time_parsing_result.get('user_friendly_time', 'at the specified time')
-                
-                if confidence > 0.7:
-                    clean_message = f"Perfect! I've set a reminder for '{task_description}' {time_description}. I'll make sure to remind you!"
+            if result:
+                # Format user-friendly time
+                time_diff = parsed_datetime - current_time
+                if time_diff.total_seconds() < 3600:  # Less than 1 hour
+                    minutes = int(time_diff.total_seconds() / 60)
+                    time_description = f"in {minutes} minute{'s' if minutes != 1 else ''}"
+                elif time_diff.total_seconds() < 86400:  # Less than 1 day
+                    hours = int(time_diff.total_seconds() / 3600)
+                    time_description = f"in {hours} hour{'s' if hours != 1 else ''}"
                 else:
-                    clean_message = f"I've created a reminder for '{task_description}' {time_description}. If this time isn't quite right, just let me know and I can adjust it!"
-                    
-                # Add language detection context if non-English
-                if original_language != 'English' and translation_result.get('needs_translation', False):
-                    clean_message += f" (I understood your request in {original_language})"
+                    time_description = f"on {parsed_datetime.strftime('%B %d at %I:%M %p')}"
+                
+                success_message = f"Perfect! I'll remind you about '{task_description}' {time_description}."
+                print(f"✅ Enhanced Reminder Agent: Created reminder - {success_message}")
+                
+                return {
+                    "message": success_message,
+                    "status": "success",
+                    "actions": [{
+                        "type": "reminder_created",
+                        "task": task_description,
+                        "reminder_time": parsed_datetime.isoformat(),
+                        "user_friendly_time": time_description
+                    }]
+                }
             else:
-                clean_message = f"I've got it! I'll make sure to remind you about {task_description}."
-            
-            return {"message": clean_message}
-            
+                return {"message": "I had trouble creating that reminder. Please try again."}
+                
         except Exception as e:
-            print(f"Reminder creation error: {e}")
-            return {"message": "I'm having trouble setting up that reminder right now. Please try again."}
+            print(f"⚠️ Enhanced Reminder Agent: Database error: {e}")
+            return {"message": "I had trouble saving that reminder. Please try again."}
+    
+    def _extract_task_description(self, user_input):
+        """Extract task description from user input."""
+        # Remove common reminder phrases
+        task = user_input.lower()
+        
+        # Indonesian patterns
+        for pattern in ['ingetin saya untuk', 'ingetin saya', 'ingetin', 'ingatin']:
+            if pattern in task:
+                task = task.split(pattern, 1)[1].strip()
+                break
+        
+        # English patterns
+        for pattern in ['remind me to', 'remind me about', 'remind me that', 'set reminder for']:
+            if pattern in task:
+                task = task.split(pattern, 1)[1].strip()
+                break
+        
+        # Remove time expressions (simple cleanup)
+        time_patterns = ['dalam', 'menit', 'jam', 'lagi', 'in', 'minutes', 'hours', 'mins', 'hrs']
+        words = task.split()
+        cleaned_words = []
+        skip_next = False
+        
+        for i, word in enumerate(words):
+            if skip_next:
+                skip_next = False
+                continue
+            
+            # Skip numbers followed by time units
+            if word.isdigit() and i + 1 < len(words) and words[i + 1] in time_patterns:
+                skip_next = True
+                continue
+            
+            if word not in time_patterns:
+                cleaned_words.append(word)
+        
+        result = ' '.join(cleaned_words).strip()
+        return result if result else "Reminder"
     
     async def _handle_reminder_conversation(self, user_input, system_prompt):
-        """Handle general reminder-related conversation."""
-        user_prompt = f"""
-User said: {user_input}
-
-This is about reminders. Respond naturally and helpfully.
-Do not include any technical details.
-"""
-        
+        """Handle general reminder conversation."""
         try:
-            response = self.ai_model.generate_content([system_prompt, user_prompt])
-            response_text = response.text
-            clean_message = self._clean_response(response_text)
-            return {"message": clean_message}
+            conversation_prompt = f"""{system_prompt}
+
+User message: {user_input}
+
+Respond naturally as a helpful reminder assistant. Be conversational and offer to help create reminders."""
+            
+            response = await self.ai_model.generate_content_async(conversation_prompt)
+            return {"message": response.text.strip()}
+            
         except Exception as e:
-            print(f"AI response error: {e}")
+            print(f"Enhanced Reminder Agent conversation error: {e}")
             return {"message": "I'd be happy to help you with reminders! What would you like me to remind you about?"}
-    
-    def _translate_input(self, text):
-        """Translate input text to English if needed."""
-        if self.translate_to_english:
-            try:
-                return self.translate_to_english(text)
-            except Exception as e:
-                print(f"Translation error: {e}")
-        
-        # Fallback: assume English
-        return {
-            'original_text': text,
-            'translated_text': text,
-            'detected_language': 'English',
-            'needs_translation': False
-        }
-    
-    def _parse_time_with_ai_fallback(self, text, current_time, user_timezone):
-        """Parse time using AI with fallback to basic parsing."""
-        if self.parse_time_with_ai:
-            try:
-                return self.parse_time_with_ai(text, current_time, user_timezone)
-            except Exception as e:
-                print(f"AI time parsing error: {e}")
-        
-        # Fallback: basic relative time detection
-        return self._basic_time_fallback(text, current_time)
-    
-    def _basic_time_fallback(self, text, current_time):
-        """Basic fallback time parsing for when AI fails."""
-        from datetime import timedelta
-        import re
-        
-        text_lower = text.lower()
-        
-        # Try to extract minutes
-        minute_patterns = [r'(\d+)\s*menit', r'(\d+)\s*minutes?', r'(\d+)\s*mins?']
-        for pattern in minute_patterns:
-            match = re.search(pattern, text_lower)
-            if match:
-                minutes = int(match.group(1))
-                new_time = current_time + timedelta(minutes=minutes)
-                return {
-                    'parsed_datetime': new_time,
-                    'confidence': 0.8,
-                    'user_friendly_time': f'in {minutes} minutes',
-                    'time_type': 'relative',
-                    'task_description': re.sub(pattern, '', text_lower).strip()
-                }
-        
-        # Default: tomorrow at 15:00
-        tomorrow = current_time + timedelta(days=1)
-        default_time = tomorrow.replace(hour=15, minute=0, second=0, microsecond=0)
-        
-        return {
-            'parsed_datetime': default_time,
-            'confidence': 0.3,
-            'user_friendly_time': 'tomorrow afternoon',
-            'time_type': 'absolute',
-            'task_description': text
-        }
-    
-    def _extract_task_description(self, original_text, translated_text):
-        """Extract task description from the input text."""
-        # Remove common reminder keywords
-        text = translated_text or original_text
-        
-        # Remove reminder triggers
-        for phrase in ['remind me to', 'remind me about', 'set reminder for', 'reminder to', 'ingetin']:
-            text = text.replace(phrase, '').strip()
-        
-        # Remove time expressions (basic cleanup)
-        import re
-        text = re.sub(r'\d+\s*(menit|minutes?|mins?|hours?|hrs?)\s*(lagi|later|from now)?', '', text, flags=re.IGNORECASE)
-        text = re.sub(r'(in|dalam)\s*\d+\s*(menit|minutes?|mins?)', '', text, flags=re.IGNORECASE)
-        text = re.sub(r'(tomorrow|besok|mañana|demain)', '', text, flags=re.IGNORECASE)
-        
-        # Clean up extra spaces
-        text = ' '.join(text.split())
-        
-        return text.strip() or original_text
