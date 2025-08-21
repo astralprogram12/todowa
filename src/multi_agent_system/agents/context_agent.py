@@ -3,7 +3,7 @@ import database_personal as database
 import os
 
 class ContextAgent(BaseAgent):
-    """Agent for context management without technical leaks."""
+    """Agent for context management with conversation memory for v3.5."""
     
     def __init__(self, supabase, ai_model):
         super().__init__(supabase, ai_model, agent_name="ContextAgent")
@@ -52,7 +52,12 @@ Respond like an assistant with excellent memory for past conversations.
             
             system_prompt = self.comprehensive_prompts.get('core_system', 'You are a helpful assistant with good memory.')
             
+            # Get the conversation history
+            conversation_history = self._get_conversation_history(context)
+            
             user_prompt = f"""
+{conversation_history}
+
 User is asking about past context or wants to reference previous conversations: {user_input}
 
 Help them by recalling relevant information or acknowledging the context.
@@ -65,6 +70,9 @@ Do not include any technical details or system information.
             
             # Clean the response to prevent leaks
             clean_message = self._clean_response(response_text)
+            
+            # Update conversation memory
+            self._update_conversation_memory(context, user_input, clean_message)
             
             # Log action (internal only)
             user_id = context.get('user_id')

@@ -4,9 +4,10 @@
 import database_personal as database
 import os
 import re
+from datetime import datetime
 
 class BaseAgent:
-    """Base agent class with leak-proof architecture."""
+    """Base agent class with leak-proof architecture and conversation memory for v3.5."""
 
     def __init__(self, supabase, ai_model, agent_name=None):
         """Initialize the base agent with correct parameters."""
@@ -79,6 +80,45 @@ IMPORTANT: Your response must be ONLY user-friendly text. Never include:
         clean_message = re.sub(r'\s+', ' ', clean_message).strip()
         
         return clean_message
+    
+    def _update_conversation_memory(self, context, user_input, response_text):
+        """Update the conversation memory with the latest exchange."""
+        if not context:
+            return
+            
+        # Initialize memory if it doesn't exist
+        if 'conversation_memory' not in context:
+            context['conversation_memory'] = []
+            
+        # Add the new exchange
+        timestamp = datetime.now().isoformat()
+        exchange = {
+            'timestamp': timestamp,
+            'user': user_input,
+            'assistant': response_text
+        }
+        
+        context['conversation_memory'].append(exchange)
+        
+        # Keep only the last 10 exchanges
+        if len(context['conversation_memory']) > 10:
+            context['conversation_memory'] = context['conversation_memory'][-10:]
+            
+    def _get_conversation_history(self, context):
+        """Get formatted conversation history for context."""
+        if not context or 'conversation_memory' not in context:
+            return ""
+            
+        history = context.get('conversation_memory', [])
+        if not history:
+            return ""
+            
+        formatted_history = "Recent Conversation History:\n"
+        for exchange in history:
+            formatted_history += f"User: {exchange.get('user', '')}\n"
+            formatted_history += f"Assistant: {exchange.get('assistant', '')}\n\n"
+            
+        return formatted_history
         
     async def process(self, user_input, context, routing_info=None):
         """Process user input and return a response."""

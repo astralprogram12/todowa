@@ -98,7 +98,9 @@ def webhook():
     except Exception as e:
         print(f"An unexpected error occurred in webhook: {str(e)}")
         traceback.print_exc()
-        return jsonify({"error": f"An internal server error occurred: {str(e)}"}), 500@app.route('/health', methods=['GET'])
+        return jsonify({"error": f"An internal server error occurred: {str(e)}"}), 500
+
+@app.route('/health', methods=['GET'])
 def health_check():
     """Simple health check endpoint."""
     if multi_agent_system:

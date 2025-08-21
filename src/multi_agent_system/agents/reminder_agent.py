@@ -5,7 +5,7 @@ import re
 from datetime import datetime, timedelta, timezone
 
 class ReminderAgent(BaseAgent):
-    """Enhanced Agent for reminder management with accurate time parsing for version 3.0."""
+    """Enhanced Agent for reminder management with accurate time parsing for version 3.5."""
     
     def __init__(self, supabase, ai_model):
         super().__init__(supabase, ai_model, agent_name="ReminderAgent")
@@ -48,28 +48,66 @@ Respond like a helpful personal assistant managing reminders.
         """
         return f"{core_identity}\n\n{time_handling}\n\n{reminder_specialized}{leak_prevention}"
     
+    async def extract_task_description(self, user_input):
+        """
+        Use AI to extract only the essential task description from user input.
+        For example, from "remind me to eat in 5 minutes", extract just "eat"
+        """
+        system_prompt = """You are a task extraction expert. Extract ONLY the core task from the user's input.
+        DO NOT include time expressions, prepositions, or unnecessary context.
+        Return ONLY the core task/action phrase - nothing else.
+        
+        Examples:
+        "remind me to buy groceries tomorrow" → "buy groceries"
+        "I need to call mom at 5pm" → "call mom"
+        "Please create a task to finish report by Friday" → "finish report"
+        "Add a reminder to eat in 10 minutes" → "eat"
+        """
+        
+        user_prompt = f"Extract the core task from: {user_input}"
+        
+        try:
+            response = self.ai_model.generate_content([system_prompt, user_prompt])
+            return response.text.strip()
+        except Exception as e:
+            print(f"Error extracting task: {e}")
+            # Fallback to simple extraction if AI fails
+            for phrase in ['remind me to', 'remind me about', 'set reminder for', 'reminder to', 'task to']:
+                if phrase in user_input.lower():
+                    return user_input[user_input.lower().find(phrase) + len(phrase):].strip()
+            return user_input
+    
     def parse_reminder_time(self, user_input):
         """
         Parse time expressions from user input like "in 5 minutes", "tomorrow at 3pm", etc.
+        Enhanced for v3.5 to handle abbreviations like "10m" for 10 minutes.
         Returns a datetime object and a description of the time.
         """
         now = datetime.now(timezone.utc)
         user_input_lower = user_input.lower()
         
-        # Check for "in X minutes/hours"
-        minute_match = re.search(r'in\s+(\d+)\s+minute', user_input_lower)
+        # Check for "in X minutes/m/min" - enhanced to catch abbreviations
+        minute_match = re.search(r'in\s*(\d+)\s*m(in(ute)?s?)?\b', user_input_lower)
         if minute_match:
             minutes = int(minute_match.group(1))
             reminder_time = now + timedelta(minutes=minutes)
             time_description = f"in {minutes} minute{'s' if minutes > 1 else ''}"
             return reminder_time, time_description
             
-        # Check for "in X hours"
-        hour_match = re.search(r'in\s+(\d+)\s+hour', user_input_lower)
+        # Check for "in X hours/h/hr" - enhanced to catch abbreviations
+        hour_match = re.search(r'in\s*(\d+)\s*h(our)?s?\b', user_input_lower)
         if hour_match:
             hours = int(hour_match.group(1))
             reminder_time = now + timedelta(hours=hours)
             time_description = f"in {hours} hour{'s' if hours > 1 else ''}"
+            return reminder_time, time_description
+        
+        # Check for "in X days/d" - enhanced to catch abbreviations
+        day_match = re.search(r'in\s*(\d+)\s*d(ay)?s?\b', user_input_lower)
+        if day_match:
+            days = int(day_match.group(1))
+            reminder_time = now + timedelta(days=days)
+            time_description = f"in {days} day{'s' if days > 1 else ''}"
             return reminder_time, time_description
         
         # Check for "today at X" (assume PM for ambiguous times 1-7)
@@ -119,6 +157,21 @@ Respond like a helpful personal assistant managing reminders.
             time_description = f"tomorrow at {hour % 12 or 12}:{minute:02d} {'PM' if hour >= 12 else 'AM'}"
             return reminder_time, time_description
         
+        # Check for standalone time (10m, 30m, 1h)
+        standalone_time_match = re.search(r'\b(\d+)\s*([mh])\b', user_input_lower)
+        if standalone_time_match:
+            value = int(standalone_time_match.group(1))
+            unit = standalone_time_match.group(2)
+            
+            if unit == 'm':
+                reminder_time = now + timedelta(minutes=value)
+                time_description = f"in {value} minute{'s' if value > 1 else ''}"
+            elif unit == 'h':
+                reminder_time = now + timedelta(hours=value)
+                time_description = f"in {value} hour{'s' if value > 1 else ''}"
+            
+            return reminder_time, time_description
+        
         # Default: Set for tomorrow morning at 9 AM
         tomorrow = now + timedelta(days=1)
         reminder_time = tomorrow.replace(hour=9, minute=0, second=0, microsecond=0)
@@ -145,6 +198,8 @@ Respond like a helpful personal assistant managing reminders.
             if is_query_operation:
                 # Handle query operations (read reminders from tasks table)
                 user_prompt = f"""
+{self._get_conversation_history(context)}
+
 User wants to see their reminders: {user_input}
 
 Respond naturally with their current reminders. Be helpful and conversational.
@@ -169,38 +224,44 @@ Do not include any technical details.
                     clean_message = "I'd need to set up your account first to show your reminders."
                     
             elif is_action_operation:
-                # Handle action operations (create reminders using A+C approach)
-                # A: Always create task + reminder (using reminder_at field)
-                # C: Ask for clarification if task isn't clear
+                # Extract clean task description using AI
+                task_description = await self.extract_task_description(user_input)
                 
-                # Extract reminder text
-                reminder_text = user_input
-                for phrase in ['remind me to', 'remind me about', 'set reminder for', 'reminder to']:
-                    if phrase in user_input.lower():
-                        start_idx = user_input.lower().find(phrase) + len(phrase)
-                        reminder_text = user_input[start_idx:].strip()
-                        break
+                # Parse the reminder time using the enhanced time parsing
+                reminder_time, time_description = self.parse_reminder_time(user_input)
+                reminder_time_iso = reminder_time.isoformat()
                 
-                # Create task with reminder_at field (simplified A+C approach)
+                # Create task with reminder_at field
                 if user_id:
                     try:
-                        # Parse the reminder time using the enhanced time parsing
-                        reminder_time, time_description = self.parse_reminder_time(user_input)
-                        reminder_time_iso = reminder_time.isoformat()
-                        
                         # Create the task with reminder_at field
                         task_data = database.add_task_entry(
                             supabase=self.supabase,
                             user_id=user_id,
-                            title=reminder_text,
+                            title=task_description,  # Use the clean task description
                             category='reminder_based',
                             reminder_at=reminder_time_iso
                         )
                         
-                        if task_data:
-                            clean_message = f"Perfect! I've created a task '{reminder_text}' with a reminder set for {time_description}. Is there anything else I can help you with?"
+                        # Determine if this is an important task that needs follow-up
+                        task_importance_system = """You are a task importance analyzer. Determine if the given task is important enough to offer additional assistance.
+                        Rate the task from 1-5, where 1 is routine (eating, drinking water) and 5 is critical (urgent meeting, important deadline).
+                        Return ONLY the number."""
+                        
+                        task_importance_prompt = f"Rate the importance of this task: {task_description}"
+                        
+                        try:
+                            importance_response = self.ai_model.generate_content([task_importance_system, task_importance_prompt])
+                            importance_rating = int(importance_response.text.strip())
+                        except:
+                            importance_rating = 3  # Default to medium importance
+                        
+                        # For important tasks (4-5), provide a different response style
+                        if importance_rating >= 4:
+                            clean_message = f"I've set a reminder for '{task_description}' {time_description}. Would you like me to help you prepare for this or set any additional reminders?"
                         else:
-                            clean_message = f"I've got it! I'll make sure to remind you about {reminder_text}."
+                            # For routine tasks, keep it simple
+                            clean_message = f"Got it! I'll remind you about '{task_description}' {time_description}."
                             
                     except Exception as e:
                         print(f"Reminder creation error: {e}")
@@ -210,6 +271,8 @@ Do not include any technical details.
             else:
                 # General reminder-related conversation
                 user_prompt = f"""
+{self._get_conversation_history(context)}
+
 User said: {user_input}
 
 This is about reminders. Respond naturally and helpfully.
@@ -220,6 +283,9 @@ Do not include any technical details.
                 response = self.ai_model.generate_content([system_prompt, user_prompt])
                 response_text = response.text
                 clean_message = self._clean_response(response_text)
+            
+            # Update conversation memory
+            self._update_conversation_memory(context, user_input, clean_message)
             
             # Log action (internal only)
             if user_id:

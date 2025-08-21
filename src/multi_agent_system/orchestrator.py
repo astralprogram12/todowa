@@ -1,5 +1,5 @@
-# orchestrator.py (FINAL, CONSOLIDATED VERSION)
-# Uses the single, unified tool registry.
+# orchestrator.py (UPDATED VERSION FOR 3.5)
+# Uses the single, unified tool registry and adds conversation memory.
 
 import asyncio
 import traceback
@@ -28,7 +28,7 @@ from .agents import (
 from .response_combiner import ResponseCombiner
 
 class Orchestrator:
-    """Orchestrator using a unified tool system and transactional agent routing."""
+    """Orchestrator with unified tool system, conversation memory, and improved parsing for v3.5."""
     
     def __init__(self, supabase, ai_model):
         self.supabase = supabase
@@ -65,7 +65,7 @@ class Orchestrator:
         print("...All agent prompts loaded.")
 
     async def process_user_input(self, user_id: str, user_input: str, phone_number: str, conversation_id: Optional[str] = None):
-        """Processes user input and sends a reply using the unified tool registry."""
+        """Processes user input with conversation memory and sends a reply using the unified tool registry."""
         final_response_dict = {}
         # --- [THE FIX] Set the context for all tools at the start of the request ---
         tool_registry.set_injection_context({"supabase": self.supabase, "user_id": user_id})
@@ -75,7 +75,7 @@ class Orchestrator:
             if is_silent and 'silent' not in user_input.lower():
                 return {"message": "Silent mode is active. Message recorded.", "actions": []}
 
-            # ... (rest of the agent processing logic is correct)
+            # Get or create context with conversation memory
             context = await self._get_or_create_context(user_id, conversation_id)
             classification = await self._classify_user_input(user_input, context)
             agent_responses = []
@@ -85,7 +85,10 @@ class Orchestrator:
             primary_agent_name = self._map_intent_to_agent(primary_intent)
             
             if primary_agent_name == 'clarification_needed':
-                final_response_dict = {"message": "I'm not quite sure what you mean. Could you please rephrase that?", "status": "clarification_needed"}
+                response_message = "I'm not quite sure what you mean. Could you please rephrase that?"
+                final_response_dict = {"message": response_message, "status": "clarification_needed"}
+                # Still update conversation memory even for clarification requests
+                self._update_conversation_memory(context, user_input, response_message)
             elif primary_agent_name in self.agents:
                 primary_response = await self.agents[primary_agent_name].process(user_input, context, classification)
                 agent_responses.append(primary_response)
@@ -96,6 +99,15 @@ class Orchestrator:
                             agent_responses.append(secondary_response)
             if agent_responses:
                 final_response_dict = ResponseCombiner.combine_responses(agent_responses, classification)
+                
+                # Update conversation memory with the final response
+                response_message = final_response_dict.get('message')
+                if response_message:
+                    if hasattr(self.agents[primary_agent_name], '_update_conversation_memory'):
+                        self.agents[primary_agent_name]._update_conversation_memory(context, user_input, response_message)
+                    else:
+                        # Fallback to updating memory directly in context
+                        self._update_conversation_memory(context, user_input, response_message)
             
             # Send the final reply using the tool registry
             message_to_send = final_response_dict.get('message')
@@ -134,13 +146,42 @@ class Orchestrator:
         context_key = f"{user_id}:{conversation_id or 'default'}"
         if context_key not in self.user_contexts:
             self.user_contexts[context_key] = {
-                'user_id': user_id, 'conversation_id': conversation_id, 'created_at': datetime.now().isoformat(),
-                'last_agent': None, 'last_input': None, 'last_response': None, 'last_classification': None,
-                'history': [], 'preferences': {}, 'memory': {}
+                'user_id': user_id, 
+                'conversation_id': conversation_id, 
+                'created_at': datetime.now().isoformat(),
+                'last_agent': None, 
+                'last_input': None, 
+                'last_response': None, 
+                'last_classification': None,
+                'history': [], 
+                'preferences': {}, 
+                'memory': {},
+                'conversation_memory': []  # Added for v3.5: stores the last 10 conversation bubbles
             }
-        context = self.user_contexts[context_key]
-        if len(context['history']) > 10: context['history'] = context['history'][-10:]
-        return context
+        return self.user_contexts[context_key]
+    
+    def _update_conversation_memory(self, context, user_input, response_text):
+        """Update the conversation memory with the latest exchange."""
+        if not context:
+            return
+            
+        # Initialize memory if it doesn't exist
+        if 'conversation_memory' not in context:
+            context['conversation_memory'] = []
+            
+        # Add the new exchange
+        timestamp = datetime.now().isoformat()
+        exchange = {
+            'timestamp': timestamp,
+            'user': user_input,
+            'assistant': response_text
+        }
+        
+        context['conversation_memory'].append(exchange)
+        
+        # Keep only the last 10 exchanges
+        if len(context['conversation_memory']) > 10:
+            context['conversation_memory'] = context['conversation_memory'][-10:]
     
     def _map_intent_to_agent(self, intent: str) -> str:
         """Map enhanced intent classification to actual agent names"""

@@ -5,7 +5,7 @@ import re
 from datetime import datetime, timedelta, timezone
 
 class AuditAgent(BaseAgent):
-    """Enhanced Audit Agent for version 3.0 that verifies truth in responses."""
+    """Enhanced Audit Agent for version 3.5 that verifies truth in responses and confirms ambiguous inputs."""
     
     def __init__(self, supabase, ai_model):
         super().__init__(supabase, ai_model, agent_name="AuditAgent")
@@ -48,24 +48,55 @@ You are a VERIFICATION AGENT designed to:
 2. Verify that time-related information is correct (e.g., "in 5 minutes" vs "tomorrow")
 3. Ensure all claims made are true and supported
 4. Flag any potential inconsistencies or errors
+5. Extract clean task descriptions from user input
+6. Request clarification for any ambiguous inputs
 
 Respond like a professional audit consultant who prioritizes TRUTH above all else.
         """
         return f"{core_identity}\n\n{audit_specialized}{leak_prevention}"
+    
+    async def extract_task_description(self, user_input):
+        """
+        Use AI to extract only the essential task description from user input.
+        For example, from "remind me to eat in 5 minutes", extract just "eat"
+        """
+        system_prompt = """You are a task extraction expert. Extract ONLY the core task from the user's input.
+        DO NOT include time expressions, prepositions, or unnecessary context.
+        Return ONLY the core task/action phrase - nothing else.
+        
+        Examples:
+        "remind me to buy groceries tomorrow" → "buy groceries"
+        "I need to call mom at 5pm" → "call mom"
+        "Please create a task to finish report by Friday" → "finish report"
+        "Add a reminder to eat in 10 minutes" → "eat"
+        """
+        
+        user_prompt = f"Extract the core task from: {user_input}"
+        
+        try:
+            response = self.ai_model.generate_content([system_prompt, user_prompt])
+            return response.text.strip()
+        except Exception as e:
+            print(f"Error extracting task: {e}")
+            # Fallback to simple extraction if AI fails
+            for phrase in ['remind me to', 'remind me about', 'set reminder for', 'reminder to', 'task to']:
+                if phrase in user_input.lower():
+                    return user_input[user_input.lower().find(phrase) + len(phrase):].strip()
+            return user_input
 
     async def verify_time_accuracy(self, response_text, user_input):
         """
         Verify that time-related information in the response matches the user's request.
         This specifically checks for time discrepancies like "in 5 minutes" vs "tomorrow".
         """
-        # Check if user input contains time-related phrases
+        # Enhanced time pattern recognition for abbreviations
         time_phrases = [
-            (r'in (\d+) minute', 'minutes'),
-            (r'in (\d+) hour', 'hours'),
-            (r'in (\d+) day', 'days'),
-            (r'today at (\d+)', 'today'),
-            (r'tomorrow at (\d+)', 'tomorrow'),
-            (r'next week', 'next week'),
+            (r'in \s*(\d+)\s*m(in(ute)?s?)?\b', 'minutes'),  # matches "in 5m", "in 5min", "in 5mins", "in 5 minutes"
+            (r'in \s*(\d+)\s*h(our)?s?\b', 'hours'),  # matches "in 2h", "in 2hr", "in 2hrs", "in 2 hours"
+            (r'in \s*(\d+)\s*d(ay)?s?\b', 'days'),  # matches "in 3d", "in 3day", "in 3days", "in 3 days"
+            (r'today at \s*(\d+)(:\d+)?\s*(am|pm)?\b', 'today'),
+            (r'tomorrow at \s*(\d+)(:\d+)?\s*(am|pm)?\b', 'tomorrow'),
+            (r'next week\b', 'next week'),
         ]
         
         user_time_spec = None
@@ -106,6 +137,37 @@ Respond like a professional audit consultant who prioritizes TRUTH above all els
                 return response_text
         
         return response_text
+    
+    async def check_for_ambiguity(self, user_input):
+        """
+        Check if the user input is ambiguous and needs clarification.
+        """
+        system_prompt = """You are an ambiguity detection expert. Determine if the user's input is ambiguous and requires clarification.
+        Return "YES" if clarification is needed with a specific question to ask the user.
+        Return "NO" if the input is clear.
+        
+        Examples of ambiguous inputs:
+        - "Remind me later" (When is "later"?)
+        - "Create a task for the thing" (What "thing"?)
+        - "Meeting with the team" (Which team? When?)
+        - "10m" (Is this 10 minutes or 10 meters?)
+        """
+        
+        user_prompt = f"Analyze this input for ambiguity: {user_input}"
+        
+        try:
+            response = self.ai_model.generate_content([system_prompt, user_prompt])
+            result = response.text.strip()
+            
+            if result.startswith("YES"):
+                # Extract the clarification question
+                question = result.replace("YES", "", 1).strip()
+                return True, question
+            else:
+                return False, None
+        except Exception as e:
+            print(f"Error checking ambiguity: {e}")
+            return False, None
         
     async def process(self, user_input, context, routing_info=None):
         try:
@@ -114,23 +176,59 @@ Respond like a professional audit consultant who prioritizes TRUTH above all els
             
             system_prompt = self.comprehensive_prompts.get('core_system', 'You are a helpful audit assistant.')
             
-            user_prompt = f"""
+            # First, check for ambiguity in the input
+            is_ambiguous, clarification_question = await self.check_for_ambiguity(user_input)
+            
+            if is_ambiguous and clarification_question:
+                return {
+                    "message": clarification_question,
+                    "status": "needs_clarification"
+                }
+            
+            # If it's a reminder, extract the core task
+            if 'remind' in user_input.lower() or 'reminder' in user_input.lower() or 'task' in user_input.lower():
+                # Extract the core task from the user input
+                task_description = await self.extract_task_description(user_input)
+                
+                # Determine if this is an important task that needs follow-up
+                task_importance_system = """You are a task importance analyzer. Determine if the given task is important enough to offer additional assistance.
+                Rate the task from 1-5, where 1 is routine (eating, drinking water) and 5 is critical (urgent meeting, important deadline).
+                Return ONLY the number."""
+                
+                task_importance_prompt = f"Rate the importance of this task: {task_description}"
+                
+                try:
+                    importance_response = self.ai_model.generate_content([task_importance_system, task_importance_prompt])
+                    importance_rating = int(importance_response.text.strip())
+                except:
+                    importance_rating = 3  # Default to medium importance
+                
+                # For important tasks (4-5), provide a different response style
+                if importance_rating >= 4:
+                    response_text = f"I've added '{task_description}' to your tasks. Would you like me to help you prepare for this or provide any additional reminders?"
+                else:
+                    # For routine tasks, keep it simple
+                    response_text = f"Got it! I've added '{task_description}' to your tasks."
+                
+                clean_message = response_text
+            else:
+                user_prompt = f"""
 User has an audit-related question: {user_input}
 
 Provide helpful audit-related information. Be professional and thorough.
 Do not include any technical details or system information.
 """
-            
-            # Make AI call (synchronous)
-            response = self.ai_model.generate_content([system_prompt, user_prompt])
-            response_text = response.text
-            
-            # Clean the response to prevent leaks
-            clean_message = self._clean_response(response_text)
-            
-            # Verify time accuracy in responses
-            if 'remind' in user_input.lower() or 'reminder' in user_input.lower():
-                clean_message = await self.verify_time_accuracy(clean_message, user_input)
+                
+                # Make AI call (synchronous)
+                response = self.ai_model.generate_content([system_prompt, user_prompt])
+                response_text = response.text
+                
+                # Clean the response to prevent leaks
+                clean_message = self._clean_response(response_text)
+                
+                # Verify time accuracy in responses
+                if 'remind' in user_input.lower() or 'reminder' in user_input.lower():
+                    clean_message = await self.verify_time_accuracy(clean_message, user_input)
             
             # Log action (internal only)
             user_id = context.get('user_id')
