@@ -1,4 +1,4 @@
-# src/multi_agent_system/agents/intent_classifier_agent.py (FINAL CORRECTED VERSION)
+# src/multi_agent_system/agents/intent_classifier_agent.py (DEFINITIVE VERSION)
 
 from .base_agent import BaseAgent
 import database_personal as database
@@ -10,10 +10,7 @@ class IntentClassifierAgent(BaseAgent):
         super().__init__(supabase, ai_model, agent_name="IntentClassifierAgent")
         self.comprehensive_prompts = {}
 
-    # --- [THE FIX] Renamed 'process' back to 'classify_intent' ---
-    # The Orchestrator specifically looks for this method name.
     async def classify_intent(self, user_input, context):
-    # --- [END OF FIX] ---
         """Classifies user intent using an AI model."""
         try:
             if not self.comprehensive_prompts:
@@ -22,8 +19,12 @@ class IntentClassifierAgent(BaseAgent):
             system_prompt = self.comprehensive_prompts.get('core_system', "You are an expert at classifying user intent.")
             user_prompt = self._build_classification_prompt(user_input, context)
 
+            # --- [THE DEFINITIVE FIX] ---
+            # 1. ALWAYS 'await' the call to the AI library.
             response = await self.ai_model.generate_content([system_prompt, user_prompt])
+            # 2. The 'response' object itself is NOT awaitable. Get the text directly.
             response_text = response.text
+            # --- [END OF FIX] ---
             
             # Log the classification action
             user_id = context.get('user_id')
@@ -34,8 +35,14 @@ class IntentClassifierAgent(BaseAgent):
                     success_status=True
                 )
             
-            # We need to parse the JSON from the AI's response
-            return self._parse_ai_response(response_text)
+            parsed_response = self._parse_ai_response(response_text)
+            
+            # Sanity check on the AI's confidence
+            if parsed_response.get("confidence", 0) < 0.5:
+                print("AI confidence is too low. Overriding to ask for clarification.")
+                return self._clarification_fallback(user_input)
+                
+            return parsed_response
             
         except Exception as e:
             print(f"!!! ERROR in IntentClassifierAgent: {e}")
@@ -43,7 +50,6 @@ class IntentClassifierAgent(BaseAgent):
 
     def load_comprehensive_prompts(self):
         """Loads all prompts relative to the project's structure."""
-        # ... (This function is now correct and needs no changes)
         try:
             prompts_dict = {}
             project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
@@ -73,7 +79,6 @@ class IntentClassifierAgent(BaseAgent):
 
     def _build_classification_prompt(self, user_input, context):
         """Builds the user part of the prompt for the AI."""
-        # This was part of your old, excellent prompt. We keep it here.
         return f"""
 Analyze the following user input and conversation history to determine the user's intent.
 
@@ -81,14 +86,7 @@ Analyze the following user input and conversation history to determine the user'
 **Conversation History:** {context.get('history', [])}
 
 **Available Intents:**
-- task
-- reminder
-- silent_mode
-- expert
-- guide
-- general
-- information
-- clarification_needed
+- task, reminder, silent_mode, expert, guide, general, information, clarification_needed
 
 **Instructions:**
 1. Choose the SINGLE most likely intent.
