@@ -37,6 +37,8 @@
 - Research findings and facts
 - Project notes and documentation
 - Reference materials and resources
+- phone number
+- flight number etc
 
 ## Context Variables Available
 
