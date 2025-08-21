@@ -1,9 +1,11 @@
 from .base_agent import BaseAgent
 import database_personal as database
 import os
+import re
+from datetime import datetime, timedelta, timezone
 
 class ReminderAgent(BaseAgent):
-    """Agent for reminder management without technical leaks."""
+    """Enhanced Agent for reminder management with accurate time parsing for version 3.0."""
     
     def __init__(self, supabase, ai_model):
         super().__init__(supabase, ai_model, agent_name="ReminderAgent")
@@ -46,6 +48,83 @@ Respond like a helpful personal assistant managing reminders.
         """
         return f"{core_identity}\n\n{time_handling}\n\n{reminder_specialized}{leak_prevention}"
     
+    def parse_reminder_time(self, user_input):
+        """
+        Parse time expressions from user input like "in 5 minutes", "tomorrow at 3pm", etc.
+        Returns a datetime object and a description of the time.
+        """
+        now = datetime.now(timezone.utc)
+        user_input_lower = user_input.lower()
+        
+        # Check for "in X minutes/hours"
+        minute_match = re.search(r'in\s+(\d+)\s+minute', user_input_lower)
+        if minute_match:
+            minutes = int(minute_match.group(1))
+            reminder_time = now + timedelta(minutes=minutes)
+            time_description = f"in {minutes} minute{'s' if minutes > 1 else ''}"
+            return reminder_time, time_description
+            
+        # Check for "in X hours"
+        hour_match = re.search(r'in\s+(\d+)\s+hour', user_input_lower)
+        if hour_match:
+            hours = int(hour_match.group(1))
+            reminder_time = now + timedelta(hours=hours)
+            time_description = f"in {hours} hour{'s' if hours > 1 else ''}"
+            return reminder_time, time_description
+        
+        # Check for "today at X" (assume PM for ambiguous times 1-7)
+        today_match = re.search(r'today\s+at\s+(\d+)(:\d+)?\s*(am|pm)?', user_input_lower)
+        if today_match:
+            hour = int(today_match.group(1))
+            minute_str = today_match.group(2)
+            am_pm = today_match.group(3)
+            
+            # Handle AM/PM
+            if am_pm == 'pm' and hour < 12:
+                hour += 12
+            elif am_pm != 'am' and 1 <= hour <= 7:  # Assume PM for ambiguous times 1-7
+                hour += 12
+                
+            minute = 0
+            if minute_str:
+                minute = int(minute_str.replace(':', ''))
+                
+            reminder_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            # If the time has already passed today, use tomorrow
+            if reminder_time < now:
+                reminder_time = reminder_time + timedelta(days=1)
+                
+            time_description = f"at {hour % 12 or 12}:{minute:02d} {'PM' if hour >= 12 else 'AM'}"
+            return reminder_time, time_description
+        
+        # Check for "tomorrow at X"
+        tomorrow_match = re.search(r'tomorrow\s+at\s+(\d+)(:\d+)?\s*(am|pm)?', user_input_lower)
+        if tomorrow_match:
+            hour = int(tomorrow_match.group(1))
+            minute_str = tomorrow_match.group(2)
+            am_pm = tomorrow_match.group(3)
+            
+            # Handle AM/PM
+            if am_pm == 'pm' and hour < 12:
+                hour += 12
+            elif am_pm != 'am' and 1 <= hour <= 7:  # Assume PM for ambiguous times 1-7
+                hour += 12
+                
+            minute = 0
+            if minute_str:
+                minute = int(minute_str.replace(':', ''))
+                
+            tomorrow = now + timedelta(days=1)
+            reminder_time = tomorrow.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            time_description = f"tomorrow at {hour % 12 or 12}:{minute:02d} {'PM' if hour >= 12 else 'AM'}"
+            return reminder_time, time_description
+        
+        # Default: Set for tomorrow morning at 9 AM
+        tomorrow = now + timedelta(days=1)
+        reminder_time = tomorrow.replace(hour=9, minute=0, second=0, microsecond=0)
+        time_description = "tomorrow at 9:00 AM"
+        return reminder_time, time_description
+        
     async def process(self, user_input, context, routing_info=None):
         try:
             if not self.comprehensive_prompts:
@@ -105,11 +184,9 @@ Do not include any technical details.
                 # Create task with reminder_at field (simplified A+C approach)
                 if user_id:
                     try:
-                        from datetime import datetime, timedelta, timezone
-                        
-                        # Set reminder for tomorrow as default (can be enhanced later)
-                        tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
-                        reminder_time = tomorrow.replace(hour=9, minute=0, second=0, microsecond=0).isoformat()
+                        # Parse the reminder time using the enhanced time parsing
+                        reminder_time, time_description = self.parse_reminder_time(user_input)
+                        reminder_time_iso = reminder_time.isoformat()
                         
                         # Create the task with reminder_at field
                         task_data = database.add_task_entry(
@@ -117,11 +194,11 @@ Do not include any technical details.
                             user_id=user_id,
                             title=reminder_text,
                             category='reminder_based',
-                            reminder_at=reminder_time
+                            reminder_at=reminder_time_iso
                         )
                         
                         if task_data:
-                            clean_message = f"Perfect! I've created a task '{reminder_text}' with a reminder set for tomorrow. Is there anything else I can help you with?"
+                            clean_message = f"Perfect! I've created a task '{reminder_text}' with a reminder set for {time_description}. Is there anything else I can help you with?"
                         else:
                             clean_message = f"I've got it! I'll make sure to remind you about {reminder_text}."
                             

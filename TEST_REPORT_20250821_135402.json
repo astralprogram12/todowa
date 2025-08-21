@@ -1,0 +1,249 @@
+{
+  "timestamp": "2025-08-21T13:54:02.369758",
+  "summary": {
+    "total_tests": 9,
+    "average_score": 10.0,
+    "ratings": {
+      "excellent": 0,
+      "good": 0,
+      "fair": 1,
+      "poor": 8,
+      "failed": 0
+    },
+    "features": {
+      "detailed_responses": 1,
+      "human_like_tone": 2,
+      "category_mentions": 0,
+      "priority_mentions": 0,
+      "typo_corrections": 0
+    }
+  },
+  "detailed_results": [
+    {
+      "test_case": "TC001",
+      "user_input": "Add task: Buy groceries",
+      "response": {
+        "message": "I'll help you remember to Add task: Buy groceries. What else can I assist you with?",
+        "actions": [],
+        "multi_agent": false,
+        "primary_intent": "action_task",
+        "status": "error"
+      },
+      "quality_score": 0,
+      "details_included": false,
+      "human_like": false,
+      "typo_corrected": false,
+      "category_mentioned": false,
+      "priority_mentioned": false,
+      "confirmation_clear": false,
+      "issues": [
+        "Missing task details (category, priority, etc.)",
+        "Robotic or formal tone",
+        "Unclear action confirmation"
+      ],
+      "strengths": [],
+      "overall_rating": "Poor"
+    },
+    {
+      "test_case": "TC002",
+      "user_input": "Create task: Meeting with John at 3pm",
+      "response": {
+        "message": "Got it! I've added 'Create task: Meeting with John at 3pm' to your tasks.",
+        "actions": [],
+        "multi_agent": false,
+        "primary_intent": "action_task",
+        "status": "error"
+      },
+      "quality_score": 35,
+      "details_included": false,
+      "human_like": true,
+      "typo_corrected": false,
+      "category_mentioned": false,
+      "priority_mentioned": false,
+      "confirmation_clear": true,
+      "issues": [
+        "Missing task details (category, priority, etc.)"
+      ],
+      "strengths": [
+        "Human-like conversational tone",
+        "Clear action confirmation"
+      ],
+      "overall_rating": "Poor"
+    },
+    {
+      "test_case": "TC003",
+      "user_input": "New task: Call dentist tomorrow",
+      "response": {
+        "message": "I'll help you remember to New task: Call dentist tomorrow. What else can I assist you with?",
+        "actions": [],
+        "multi_agent": false,
+        "primary_intent": "action_task",
+        "status": "error"
+      },
+      "quality_score": 0,
+      "details_included": false,
+      "human_like": false,
+      "typo_corrected": false,
+      "category_mentioned": false,
+      "priority_mentioned": false,
+      "confirmation_clear": false,
+      "issues": [
+        "Missing task details (category, priority, etc.)",
+        "Robotic or formal tone",
+        "Unclear action confirmation"
+      ],
+      "strengths": [],
+      "overall_rating": "Poor"
+    },
+    {
+      "test_case": "TC004",
+      "user_input": "Task: Finish project report by Friday",
+      "response": {
+        "message": "I couldn't find an existing task titled 'Finish project report' in your list to update. Would you like me to create a new task for 'Finish project report by Friday' instead, or were you referring to a different task?",
+        "actions": [],
+        "multi_agent": false,
+        "primary_intent": "action_task",
+        "status": "error"
+      },
+      "quality_score": 0,
+      "details_included": false,
+      "human_like": false,
+      "typo_corrected": false,
+      "category_mentioned": false,
+      "priority_mentioned": false,
+      "confirmation_clear": false,
+      "issues": [
+        "Missing task details (category, priority, etc.)",
+        "Robotic or formal tone",
+        "Unclear action confirmation"
+      ],
+      "strengths": [],
+      "overall_rating": "Poor"
+    },
+    {
+      "test_case": "TC005",
+      "user_input": "Add: Review quarterly budget",
+      "response": {
+        "message": "I'll help you remember to Add: Review quarterly budget. What else can I assist you with?",
+        "actions": [],
+        "multi_agent": false,
+        "primary_intent": "action_task",
+        "status": "error"
+      },
+      "quality_score": 0,
+      "details_included": false,
+      "human_like": false,
+      "typo_corrected": false,
+      "category_mentioned": false,
+      "priority_mentioned": false,
+      "confirmation_clear": false,
+      "issues": [
+        "Missing task details (category, priority, etc.)",
+        "Robotic or formal tone",
+        "Unclear action confirmation"
+      ],
+      "strengths": [],
+      "overall_rating": "Poor"
+    },
+    {
+      "test_case": "TYPO001",
+      "user_input": "remind me for luncz at 2",
+      "response": {
+        "message": "Perfect! I've created a task 'remind me for luncz at 2' with a reminder set for tomorrow. Is there anything else I can help you with?",
+        "actions": [],
+        "multi_agent": false,
+        "primary_intent": "action_reminder",
+        "status": "error"
+      },
+      "quality_score": 55,
+      "details_included": true,
+      "human_like": true,
+      "typo_corrected": false,
+      "category_mentioned": false,
+      "priority_mentioned": false,
+      "confirmation_clear": true,
+      "issues": [],
+      "strengths": [
+        "Detailed response with metadata",
+        "Human-like conversational tone",
+        "Clear action confirmation"
+      ],
+      "overall_rating": "Fair"
+    },
+    {
+      "test_case": "TYPO002",
+      "user_input": "add task buy grocerys",
+      "response": {
+        "message": "I'll help you remember to add task buy grocerys. What else can I assist you with?",
+        "actions": [],
+        "multi_agent": false,
+        "primary_intent": "action_task",
+        "status": "error"
+      },
+      "quality_score": 0,
+      "details_included": false,
+      "human_like": false,
+      "typo_corrected": false,
+      "category_mentioned": false,
+      "priority_mentioned": false,
+      "confirmation_clear": false,
+      "issues": [
+        "Missing task details (category, priority, etc.)",
+        "Robotic or formal tone",
+        "Unclear action confirmation"
+      ],
+      "strengths": [],
+      "overall_rating": "Poor"
+    },
+    {
+      "test_case": "TYPO003",
+      "user_input": "create meetng with boss tomorow",
+      "response": {
+        "message": "I'll help you remember to create meetng with boss tomorow. What else can I assist you with?",
+        "actions": [],
+        "multi_agent": false,
+        "primary_intent": "action_task",
+        "status": "error"
+      },
+      "quality_score": 0,
+      "details_included": false,
+      "human_like": false,
+      "typo_corrected": false,
+      "category_mentioned": false,
+      "priority_mentioned": false,
+      "confirmation_clear": false,
+      "issues": [
+        "Missing task details (category, priority, etc.)",
+        "Robotic or formal tone",
+        "Unclear action confirmation"
+      ],
+      "strengths": [],
+      "overall_rating": "Poor"
+    },
+    {
+      "test_case": "TYPO004",
+      "user_input": "Add task: Finsh homework by sunday",
+      "response": {
+        "message": "I'll help you remember to Add task: Finsh homework by sunday. What else can I assist you with?",
+        "actions": [],
+        "multi_agent": false,
+        "primary_intent": "action_task",
+        "status": "error"
+      },
+      "quality_score": 0,
+      "details_included": false,
+      "human_like": false,
+      "typo_corrected": false,
+      "category_mentioned": false,
+      "priority_mentioned": false,
+      "confirmation_clear": false,
+      "issues": [
+        "Missing task details (category, priority, etc.)",
+        "Robotic or formal tone",
+        "Unclear action confirmation"
+      ],
+      "strengths": [],
+      "overall_rating": "Poor"
+    }
+  ]
+}
