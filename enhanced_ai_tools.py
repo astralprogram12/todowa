@@ -46,7 +46,7 @@ def send_reply_message(phone_number: str, message: str, user_id: str = None) -> 
         if result and result.get("status"):
             return {"success": True, "message": "Message sent successfully."}
         else:
-            reason = result.get("reason", "Unknown Fonnte API error")
+            reason = result.get("reason", "Unknown Fonnte API error") if result else "No response from Fonnte API"
             raise AIToolsError(f"Failed to send message via Fonnte: {reason}")
             
     except Exception as e:

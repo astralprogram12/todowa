@@ -103,11 +103,11 @@ Generate a comprehensive context-aware response following all prompt guidelines.
         
         # Perform context operations if needed
         if context_action == "retrieve_history":
-            history = await self._retrieve_conversation_history(context)
+            history = self._retrieve_conversation_history(context)
             result["data"]["history"] = history
             result["actions"].append("history_retrieved")
         elif context_action == "update_context":
-            await self._update_conversation_context(context, user_input, response_text)
+            self._update_conversation_context(context, user_input, response_text)
             result["actions"].append("context_updated")
         
         return result
@@ -121,7 +121,7 @@ Generate a comprehensive context-aware response following all prompt guidelines.
         else:
             return "maintain_context"
 
-    async def _retrieve_conversation_history(self, context):
+    def _retrieve_conversation_history(self, context):
         """Retrieve relevant conversation history"""
         try:
             user_id = context.get('user_id')
@@ -138,7 +138,7 @@ Generate a comprehensive context-aware response following all prompt guidelines.
         
         return []
 
-    async def _update_conversation_context(self, context, user_input, response):
+    def _update_conversation_context(self, context, user_input, response):
         """Update the conversation context"""
         try:
             user_id = context.get('user_id')
