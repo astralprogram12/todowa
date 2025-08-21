@@ -19,6 +19,12 @@ class IntentClassifierAgent(BaseAgent):
             system_prompt = self.comprehensive_prompts.get('core_system', "You are an expert at classifying user intent.")
             user_prompt = self._build_classification_prompt(user_input, context)
 
+            # --- DIAGNOSTIC TEST ---
+            # This line is added to prove that this new version of the file is running.
+            # If you do NOT see this message in your logs, your deployment is not updating.
+            print(">>> RUNNING DEFINITIVE VERSION WITH DIAGNOSTIC LOG ...")
+            # --- END OF TEST ---
+
             # --- [THE DEFINITIVE FIX] ---
             # 1. ALWAYS 'await' the call to the AI library.
             response = await self.ai_model.generate_content([system_prompt, user_prompt])
