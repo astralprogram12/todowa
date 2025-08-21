@@ -1,4 +1,4 @@
-# src/multi_agent_system/agents/intent_classifier_agent.py (DEFINITIVE VERSION)
+# src/multi_agent_system/agents/intent_classifier_agent.py (Final Corrected Version)
 
 from .base_agent import BaseAgent
 import database_personal as database
@@ -19,16 +19,10 @@ class IntentClassifierAgent(BaseAgent):
             system_prompt = self.comprehensive_prompts.get('core_system', "You are an expert at classifying user intent.")
             user_prompt = self._build_classification_prompt(user_input, context)
 
-            # --- DIAGNOSTIC TEST ---
-            # This line is added to prove that this new version of the file is running.
-            # If you do NOT see this message in your logs, your deployment is not updating.
-            print(">>> RUNNING DEFINITIVE VERSION WITH DIAGNOSTIC LOG ...")
-            # --- END OF TEST ---
-
-            # --- [THE DEFINITIVE FIX] ---
-            # 1. ALWAYS 'await' the call to the AI library.
-            response = await self.ai_model.generate_content([system_prompt, user_prompt])
-            # 2. The 'response' object itself is NOT awaitable. Get the text directly.
+            # --- [THE FINAL FIX] ---
+            # REMOVED 'await' because the Gemini library's generate_content method is synchronous.
+            response = self.ai_model.generate_content([system_prompt, user_prompt])
+            # The 'response' object itself is NOT awaitable. Get the text directly.
             response_text = response.text
             # --- [END OF FIX] ---
             
