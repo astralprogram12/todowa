@@ -1,64 +1,21 @@
 from .base_agent import BaseAgent
-import database_personal  # Fix #4: Proper database import
+import database_personal as database  # Step 1: Fix the imports
 import os
 
 class SilentModeAgent(BaseAgent):
-    """Agent for handling silent mode operations."""
-    
-    def __init__(self, supabase, ai_model):  # Fix #1: Correct constructor
-        super().__init__(supabase, ai_model, "SilentModeAgent")
+    def __init__(self, supabase, ai_model):  # Step 2: Fix constructor
+        super().__init__(supabase, ai_model, agent_name="SilentModeAgent")
+        self.agent_type = "silent_mode"
         self.comprehensive_prompts = {}
-    
-    async def process(self, user_input, context, routing_info=None):
-        """Process silent mode-related user input and return a response.
-        
-        Args:
-            user_input: The input text from the user
-            context: The context of the conversation
-            routing_info: NEW - AI classification with smart assumptions
-            
-        Returns:
-            A response to the user input
-        """
-        user_id = context.get('user_id')
-        
-        # Load comprehensive prompts
-        if not self.comprehensive_prompts:
-            self.load_comprehensive_prompts()
-        
-        # NEW: Apply AI assumptions to enhance processing
-        enhanced_context = self._apply_ai_assumptions(context, routing_info)
-        
-        # NEW: Use AI assumptions if available
-        duration_minutes = None
-        if routing_info and routing_info.get('assumptions'):
-            print(f"SilentModeAgent using AI assumptions: {routing_info['assumptions']}")
-            # Use AI-suggested duration if available
-            duration_minutes = routing_info['assumptions'].get('duration_minutes')
-        
-        # Parse the user input to determine the silent mode operation
-        operation = self._determine_operation(user_input)
-        
-        if operation == 'activate':
-            return await self._activate_silent_mode(user_id, user_input, context)
-        elif operation == 'deactivate':
-            return await self._deactivate_silent_mode(user_id, context)
-        elif operation == 'status':
-            return await self._get_silent_status(user_id, context)
-        else:
-            return {
-                "status": "error",
-                "message": "I'm not sure what silent mode operation you want to perform. Please try again with a clearer request."
-            }
-    
-    
-    def load_comprehensive_prompts(self):
-        """Load ALL prompts from the prompts/v1/ directory and requirements."""
+
+    def load_comprehensive_prompts(self):  # Step 3: Fix prompt loading logic
+        """Loads all prompts relative to the project's structure."""
         try:
             prompts_dict = {}
+            # This code correctly finds your prompts folder
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+            v1_dir = os.path.join(project_root, "prompts", "v1")
             
-            # Load all prompts from v1 directory
-            v1_dir = "/workspace/user_input_files/todowa/prompts/v1"
             if os.path.exists(v1_dir):
                 for file_name in os.listdir(v1_dir):
                     if file_name.endswith('.md'):
@@ -66,242 +23,69 @@ class SilentModeAgent(BaseAgent):
                         file_path = os.path.join(v1_dir, file_name)
                         with open(file_path, 'r', encoding='utf-8') as f:
                             prompts_dict[prompt_name] = f.read()
-            
-            # Load requirements
-            requirements_path = "/workspace/user_input_files/99_requirements.md"
-            if os.path.exists(requirements_path):
-                with open(requirements_path, 'r', encoding='utf-8') as f:
-                    prompts_dict['requirements'] = f.read()
-            
-            # Create comprehensive system prompt for silent mode agent
+            else:
+                print(f"WARNING: Prompts directory not found at {v1_dir}")
+
+            # This part can be customized for each agent
             self.comprehensive_prompts = {
-                'core_system': self._build_silent_mode_system_prompt(prompts_dict),
-                'core_identity': prompts_dict.get('00_core_identity', ''),
-                'silent_mode': prompts_dict.get('05_silent_mode', ''),
-                'time_handling': prompts_dict.get('06_time_handling', ''),
-                'requirements': prompts_dict.get('requirements', ''),
-                'all_prompts': prompts_dict
+                'core_system': self._build_silent_mode_system_prompt(prompts_dict)
             }
-            
             return self.comprehensive_prompts
         except Exception as e:
             print(f"Error loading comprehensive prompts: {e}")
             return {}
     
-    def _build_silent_mode_system_prompt(self, prompts_dict):
-        """Build comprehensive system prompt for silent mode agent."""
-        core_identity = prompts_dict.get('00_core_identity', '')
-        silent_mode = prompts_dict.get('05_silent_mode', '')
-        time_handling = prompts_dict.get('06_time_handling', '')
-        requirements = prompts_dict.get('requirements', '')
-        
-        return f"""{core_identity}
+    def _build_silent_mode_system_prompt(self, prompts_dict):  # Customize this helper for each agent
+        """Builds the system prompt for the Silent Mode agent."""
+        core_identity = prompts_dict.get('00_core_identity', 'You are a helpful silent mode agent.')
+        return f"{core_identity}"
 
-## SILENT MODE AGENT SPECIALIZATION
-You are specifically focused on silent mode management:
-- Activating and deactivating silent mode periods
-- Managing notification suppression and quiet times
-- Handling duration-based silent mode operations
-- Providing status updates on silent mode state
-- Understanding time-based silent mode requests
-
-{silent_mode}
-
-{time_handling}
-
-## REQUIREMENTS COMPLIANCE
-{requirements}
-
-## SILENT MODE AGENT BEHAVIOR
-- ALWAYS apply time handling rules for duration parsing
-- Use silent mode guidelines for appropriate responses
-- Follow comprehensive prompt system for enhanced processing
-- Manage silent periods with precision and user preference"""
-    
-    def _apply_ai_assumptions(self, context, routing_info):
-        """Apply AI assumptions to enhance the context"""
-        enhanced_context = context.copy()
-        if routing_info:
-            enhanced_context.update(routing_info.get('assumptions', {}))
-        return enhanced_context
-    
-    def _determine_operation(self, user_input):
-        """Determine the silent mode operation from the user input."""
-        user_input_lower = user_input.lower()
-        
-        if any(phrase in user_input_lower for phrase in [
-            'go silent', 'activate silent', 'turn on silent', 'silent mode',
-            'quiet mode', "don't reply", 'stop replying', 'no replies'
-        ]):
-            return 'activate'
-        elif any(phrase in user_input_lower for phrase in [
-            'exit silent', 'end silent', 'stop silent', 'back online', 'resume replies'
-        ]):
-            return 'deactivate'
-        elif any(phrase in user_input_lower for phrase in [
-            'silent status', 'am i silent', 'in silent mode'
-        ]):
-            return 'status'
-        else:
-            return None
-    
-    async def _activate_silent_mode(self, user_id, user_input, context):
-        """Activate silent mode based on user input."""
+    async def process(self, user_input, context, routing_info=None):
+        """Process silent mode management requests."""
         try:
-            # Extract duration from user input
-            duration_minutes = self._extract_duration(user_input)
+            # Load comprehensive prompts
+            if not self.comprehensive_prompts:
+                self.load_comprehensive_prompts()  # NO 'await' here
             
-            if not duration_minutes:
-                duration_minutes = 60  # Default to 1 hour
+            assumptions = routing_info.get('assumptions', {}) if routing_info else {}
             
-            # Activate silent mode using correct database function
-            result = database_personal.activate_silent_mode(
-                supabase=self.supabase,
-                user_id=user_id,
-                duration_minutes=duration_minutes
-            )
+            system_prompt = self.comprehensive_prompts.get('core_system', "You are a helpful silent mode agent.")
             
-            if result:
-                # Log the action
-                database_personal.log_action(
+            user_prompt = f"""
+User Input: {user_input}
+Context: {context}
+Routing Info: {routing_info}
+
+Process this silent mode management request following all prompt guidelines.
+"""
+            
+            # Step 4: Fix AI model call with await
+            response = await self.ai_model.generate_content([system_prompt, user_prompt])
+            response_text = response.text
+            
+            # Log the silent mode action
+            user_id = context.get('user_id')
+            if user_id:
+                # Step 5: Fix database calls
+                database.log_action(
                     supabase=self.supabase,
                     user_id=user_id,
-                    action_type="silent_mode_activated",
+                    action_type="silent_mode_processed",
                     entity_type="silent_mode",
                     action_details={
-                        "duration_minutes": duration_minutes
+                        "mode_type": assumptions.get('mode_type', 'general')
                     },
                     success_status=True
                 )
-                
-                hours = duration_minutes // 60
-                minutes = duration_minutes % 60
-                time_str = f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
-                
-                return {
-                    "status": "success",
-                    "message": f"Silent mode activated for {time_str}. I won't send any notifications during this time.",
-                    "duration_minutes": duration_minutes,
-                    "actions": ["silent_mode_activated"]
-                }
-            else:
-                return {
-                    "status": "error",
-                    "message": "Failed to activate silent mode. Please try again."
-                }
-                
-        except Exception as e:
-            return {
-                "status": "error",
-                "message": f"Error activating silent mode: {str(e)}"
-            }
-    
-    async def _deactivate_silent_mode(self, user_id, context):
-        """Deactivate silent mode."""
-        try:
-            # Deactivate silent mode using correct database function
-            result = database_personal.deactivate_silent_mode(
-                supabase=self.supabase,
-                user_id=user_id
-            )
             
-            if result:
-                # Log the action
-                database_personal.log_action(
-                    supabase=self.supabase,
-                    user_id=user_id,
-                    action_type="silent_mode_deactivated",
-                    entity_type="silent_mode",
-                    action_details={},
-                    success_status=True
-                )
-                
-                return {
-                    "status": "success",
-                    "message": "Silent mode deactivated. I'm back online and will send notifications normally.",
-                    "actions": ["silent_mode_deactivated"]
-                }
-            else:
-                return {
-                    "status": "error",
-                    "message": "Silent mode was not active or failed to deactivate."
-                }
-                
-        except Exception as e:
             return {
-                "status": "error",
-                "message": f"Error deactivating silent mode: {str(e)}"
+                "message": response_text,
+                "actions": ["silent_mode_processed"]
             }
-    
-    async def _get_silent_status(self, user_id, context):
-        """Get current silent mode status."""
-        try:
-            # Get silent mode status using correct database function
-            status = database_personal.get_silent_mode_status(
-                supabase=self.supabase,
-                user_id=user_id
-            )
             
-            if status and status.get('is_active'):
-                remaining_minutes = status.get('remaining_minutes', 0)
-                hours = remaining_minutes // 60
-                minutes = remaining_minutes % 60
-                time_str = f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
-                
-                return {
-                    "status": "success",
-                    "message": f"Silent mode is active. {time_str} remaining.",
-                    "is_silent": True,
-                    "remaining_minutes": remaining_minutes,
-                    "actions": ["silent_status_checked"]
-                }
-            else:
-                return {
-                    "status": "success",
-                    "message": "Silent mode is not active. All notifications are enabled.",
-                    "is_silent": False,
-                    "actions": ["silent_status_checked"]
-                }
-                
         except Exception as e:
             return {
-                "status": "error",
-                "message": f"Error checking silent mode status: {str(e)}"
+                "message": "I encountered an error while processing the silent mode request.",
+                "actions": ["silent_mode_error"],
+                "error": str(e)
             }
-    
-    def _extract_duration(self, user_input):
-        """Extract duration in minutes from user input."""
-        import re
-        
-        user_input_lower = user_input.lower()
-        
-        # Look for patterns like "for 2 hours", "for 30 minutes"
-        duration_patterns = [
-            r'for (\d+) hours?',
-            r'for (\d+) hrs?',
-            r'for (\d+) h',
-            r'for (\d+) minutes?',
-            r'for (\d+) mins?',
-            r'for (\d+) m'
-        ]
-        
-        for pattern in duration_patterns:
-            match = re.search(pattern, user_input_lower)
-            if match:
-                number = int(match.group(1))
-                if 'hour' in pattern or 'hr' in pattern or pattern.endswith('h'):
-                    return number * 60  # Convert hours to minutes
-                else:
-                    return number  # Already in minutes
-        
-        # Look for standalone numbers with context
-        if 'hour' in user_input_lower:
-            numbers = re.findall(r'\d+', user_input)
-            if numbers:
-                return int(numbers[0]) * 60
-        elif 'minute' in user_input_lower:
-            numbers = re.findall(r'\d+', user_input)
-            if numbers:
-                return int(numbers[0])
-        
-        return None

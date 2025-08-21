@@ -1,5 +1,5 @@
 from .base_agent import BaseAgent
-import database_personal  # Fix #4: Proper database import
+import database_personal as database  # Step 1: Fix the imports
 import json
 import os
 
@@ -8,10 +8,43 @@ class InformationAgent(BaseAgent):
     Agent responsible for providing factual information and storing new knowledge.
     """
     
-    def __init__(self, supabase, ai_model):  # Fix #1: Correct constructor
+    def __init__(self, supabase, ai_model):  # Step 2: Fix constructor
         """Initializes the InformationAgent with correct parameters."""
         super().__init__(supabase, ai_model, agent_name="InformationAgent")
         self.comprehensive_prompts = {}
+
+    def load_comprehensive_prompts(self):  # Step 3: Fix prompt loading logic
+        """Loads all prompts relative to the project's structure."""
+        try:
+            prompts_dict = {}
+            # This code correctly finds your prompts folder
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+            v1_dir = os.path.join(project_root, "prompts", "v1")
+            
+            if os.path.exists(v1_dir):
+                for file_name in os.listdir(v1_dir):
+                    if file_name.endswith('.md'):
+                        prompt_name = file_name.replace('.md', '')
+                        file_path = os.path.join(v1_dir, file_name)
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            prompts_dict[prompt_name] = f.read()
+            else:
+                print(f"WARNING: Prompts directory not found at {v1_dir}")
+
+            # This part can be customized for each agent
+            self.comprehensive_prompts = {
+                'core_system': self._build_information_system_prompt(prompts_dict)
+            }
+            return self.comprehensive_prompts
+        except Exception as e:
+            print(f"Error loading comprehensive prompts: {e}")
+            return {}
+    
+    def _build_information_system_prompt(self, prompts_dict):  # Customize this helper for each agent
+        """Builds the system prompt for the Information agent."""
+        core_identity = prompts_dict.get('00_core_identity', 'You are a helpful information provider.')
+        ai_interactions = prompts_dict.get('04_ai_interactions', '')
+        return f"{core_identity}\n\n{ai_interactions}"
 
     async def process(self, user_input: str, context: dict, routing_info: dict) -> dict:
         """
@@ -23,7 +56,7 @@ class InformationAgent(BaseAgent):
             
             # Load comprehensive prompts
             if not self.comprehensive_prompts:
-                self.load_comprehensive_prompts()
+                self.load_comprehensive_prompts()  # NO 'await' here
             
             system_prompt = self.comprehensive_prompts.get('core_system', "You are a helpful information agent.")
             
@@ -39,10 +72,8 @@ Provide a clear and accurate response to the user's information request based on
 Incorporate these assumptions from the intent classifier: {assumptions}
 """
             
-            # Fix #2: Correct AI model call with array parameter
-            response = self.ai_model.generate_content([
-                system_prompt, user_prompt
-            ])
+            # Step 4: Fix AI model call with await
+            response = await self.ai_model.generate_content([system_prompt, user_prompt])
             response_text = response.text
 
             # Determine if this new knowledge is valuable enough to store
@@ -73,79 +104,14 @@ Incorporate these assumptions from the intent classifier: {assumptions}
         # Simple heuristic: store if the request is substantial and specific
         return len(user_input.strip()) > 20 and any(word in user_input.lower() for word in 
             ['what is', 'explain', 'how does', 'tell me about', 'definition', 'meaning'])
-    
-    def load_comprehensive_prompts(self):
-        """Load ALL prompts from the prompts/v1/ directory and requirements."""
-        try:
-            prompts_dict = {}
-            
-            # Load all prompts from v1 directory
-            v1_dir = "/workspace/user_input_files/todowa/prompts/v1"
-            if os.path.exists(v1_dir):
-                for file_name in os.listdir(v1_dir):
-                    if file_name.endswith('.md'):
-                        prompt_name = file_name.replace('.md', '')
-                        file_path = os.path.join(v1_dir, file_name)
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            prompts_dict[prompt_name] = f.read()
-            
-            # Load requirements
-            requirements_path = "/workspace/user_input_files/99_requirements.md"
-            if os.path.exists(requirements_path):
-                with open(requirements_path, 'r', encoding='utf-8') as f:
-                    prompts_dict['requirements'] = f.read()
-            
-            # Create comprehensive system prompt for information agent
-            self.comprehensive_prompts = {
-                'core_system': self._build_information_system_prompt(prompts_dict),
-                'core_identity': prompts_dict.get('00_core_identity', ''),
-                'ai_interactions': prompts_dict.get('04_ai_interactions', ''),
-                'templates': prompts_dict.get('08_templates', ''),
-                'requirements': prompts_dict.get('requirements', ''),
-                'all_prompts': prompts_dict
-            }
-            
-            return self.comprehensive_prompts
-        except Exception as e:
-            print(f"Error loading comprehensive prompts: {e}")
-            return {}
-    
-    def _build_information_system_prompt(self, prompts_dict):
-        """Build comprehensive system prompt for information agent."""
-        core_identity = prompts_dict.get('00_core_identity', '')
-        ai_interactions = prompts_dict.get('04_ai_interactions', '')
-        templates = prompts_dict.get('08_templates', '')
-        requirements = prompts_dict.get('requirements', '')
-        
-        return f"""{core_identity}
-
-## INFORMATION AGENT SPECIALIZATION
-You are specifically focused on providing factual information and knowledge management:
-- Answering factual questions with accurate information
-- Explaining concepts, definitions, and processes
-- Storing valuable knowledge exchanges in the user's journal
-- Providing clear, educational responses
-- Determining when information is worth preserving
-
-{ai_interactions}
-
-{templates}
-
-## REQUIREMENTS COMPLIANCE
-{requirements}
-
-## INFORMATION AGENT BEHAVIOR
-- ALWAYS provide accurate, well-sourced information
-- Use clear explanations and examples when helpful
-- Store valuable information exchanges for future reference
-- Apply comprehensive prompt guidance for enhanced responses"""
 
     def _store_information_exchange(self, user_input: str, response: str, context: dict):
         """Store the information exchange in the user's journal."""
         try:
             user_id = context.get('user_id')
             if user_id:
-                database_personal.log_action(
+                # Step 5: Fix database calls
+                database.log_action(
                     supabase=self.supabase,
                     user_id=user_id,
                     action_type="information_stored",

@@ -1,69 +1,70 @@
 # base_agent.py
-# Final version with correct import path and class name.
+# Fixed version following the universal template
 
+import database_personal as database  # Step 1: Fix the imports
 import os
 
-# --- [THE FIX] ---
-# Import the 'EnhancedAgentToolsMixin' class from its correct location
-# inside the 'src/multi_agent_system' package.
-from src.multi_agent_system.enhanced_agent_tools_mixin import EnhancedAgentToolsMixin
-# --- End of Fix ---
+class BaseAgent:
+    """Base agent class with correct architecture."""
 
-class BaseAgent(EnhancedAgentToolsMixin):
-    """Base agent class using the ENHANCED tool system."""
-
-    def __init__(self, supabase, ai_model, agent_name=None):
-        """Initialize the base agent."""
-        super().__init__()  # Initialize the EnhancedAgentToolsMixin
+    def __init__(self, supabase, ai_model, agent_name=None):  # Step 2: Fix constructor
+        """Initialize the base agent with correct parameters."""
         self.supabase = supabase
         self.ai_model = ai_model
         self.agent_name = agent_name or self.__class__.__name__
         self.prompts = {}
+        self.comprehensive_prompts = {}
         
-    def load_prompts(self, prompts_dir):
-        """Load prompt files from the specified directory."""
+    def load_comprehensive_prompts(self):  # Step 3: Fix prompt loading logic
+        """Loads all prompts relative to the project's structure."""
         try:
-            print(f"Loading prompts for {self.agent_name}")
-            v1_dir = os.path.join(prompts_dir, 'v1')
-            if not os.path.exists(v1_dir):
-                print(f"Warning: v1 prompt directory not found at {v1_dir}")
-                return {}
+            prompts_dict = {}
+            # This code correctly finds your prompts folder
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+            v1_dir = os.path.join(project_root, "prompts", "v1")
             
-            for file_name in os.listdir(v1_dir):
-                if file_name.endswith('.md'):
-                    prompt_name = file_name.replace('.md', '')
-                    file_path = os.path.join(v1_dir, file_name)
-                    with open(file_path, 'r') as f:
-                        self.prompts[prompt_name] = f.read()
-            
-            return self.prompts
+            if os.path.exists(v1_dir):
+                for file_name in os.listdir(v1_dir):
+                    if file_name.endswith('.md'):
+                        prompt_name = file_name.replace('.md', '')
+                        file_path = os.path.join(v1_dir, file_name)
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            prompts_dict[prompt_name] = f.read()
+            else:
+                print(f"WARNING: Prompts directory not found at {v1_dir}")
+
+            # This part can be customized for each agent
+            self.comprehensive_prompts = {
+                'core_system': self._build_base_system_prompt(prompts_dict)
+            }
+            return self.comprehensive_prompts
         except Exception as e:
-            print(f"Error loading prompts: {e}")
+            print(f"Error loading comprehensive prompts: {e}")
             return {}
-            
+
+    def _build_base_system_prompt(self, prompts_dict):  # Customize this helper for each agent
+        """Builds the system prompt for the base agent."""
+        core_identity = prompts_dict.get('00_core_identity', 'You are a helpful assistant.')
+        return f"{core_identity}"
+        
     async def process(self, user_input, context, routing_info=None):
         """Process user input and return a response."""
-        # Set the tool context for this specific request.
-        user_id = context.get('user_id')
-        if user_id:
-            self.initialize_tools(self.supabase, user_id)
-        
         raise NotImplementedError("Subclasses must implement this method")
     
     def _log_action(self, user_id, action_type, entity_type, entity_id=None, 
                    action_details=None, success_status=True, error_details=None):
         """Log an action performed by the agent."""
         try:
-            # --- [THE FIX] ---
-            # Changed from 'database' back to the correct 'database_personal'
-            from database_personal import log_action
-            # --- [END OF FIX] ---
-            
-            log_action(
-                supabase=self.supabase, user_id=user_id, action_type=action_type,
-                entity_type=entity_type, entity_id=entity_id, action_details=action_details or {},
-                success_status=success_status, error_details=error_details
+            # Step 5: Fix database calls
+            database.log_action(
+                supabase=self.supabase,
+                user_id=user_id,
+                action_type=action_type,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                action_details=action_details or {},
+                success_status=success_status,
+                error_details=error_details
             )
         except Exception as e:
             print(f"!!! AGENT LOGGING ERROR: {e}")
-    # ... other helper methods in your base agent ...

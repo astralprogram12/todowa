@@ -1,32 +1,38 @@
-# MODIFIED FILE: agents/__init__.py
-# REPLACE the existing __init__.py with this:
+# Fixed agents package
+# All agents have been updated to follow the universal template
 
 from .base_agent import BaseAgent
-from .task_agent import TaskAgent
-from .reminder_agent import ReminderAgent
-from .silent_mode_agent import SilentModeAgent
-from .coder_agent import CoderAgent
+from .action_agent import ActionAgent
 from .audit_agent import AuditAgent
+from .coder_agent import CoderAgent
+from .context_agent import ContextAgent
 from .expert_agent import ExpertAgent
-from .guide_agent import GuideAgent
 from .general_agent import GeneralAgent
+from .guide_agent import GuideAgent
+from .help_agent import HelpAgent
 from .information_agent import InformationAgent
-
-# NEW IMPORTS - ADD THESE TWO LINES:
 from .intent_classifier_agent import IntentClassifierAgent
-from ..response_combiner import ResponseCombiner
+from .preference_agent import PreferenceAgent
+from .reminder_agent import ReminderAgent
+from .silent_agent import SilentAgent
+from .silent_mode_agent import SilentModeAgent
+from .task_agent import TaskAgent
 
 __all__ = [
     'BaseAgent',
-    'TaskAgent',
-    'ReminderAgent', 
-    'SilentModeAgent',
-    'CoderAgent',
+    'ActionAgent',
     'AuditAgent',
+    'CoderAgent',
+    'ContextAgent',
     'ExpertAgent',
-    'GuideAgent',
-    'IntentClassifierAgent',  # NEW LINE
-    'ResponseCombiner'    ,
     'GeneralAgent',
-    'InformationAgent'       # NEW LINE
+    'GuideAgent',
+    'HelpAgent',
+    'InformationAgent',
+    'IntentClassifierAgent',
+    'PreferenceAgent',
+    'ReminderAgent',
+    'SilentAgent',
+    'SilentModeAgent',
+    'TaskAgent'
 ]
