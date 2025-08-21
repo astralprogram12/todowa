@@ -3,16 +3,15 @@ import database_personal as database
 import os
 
 class SilentModeAgent(BaseAgent):
+    """Agent for silent mode management without technical leaks."""
+    
     def __init__(self, supabase, ai_model):
         super().__init__(supabase, ai_model, agent_name="SilentModeAgent")
-        self.agent_type = "silent_mode"
         self.comprehensive_prompts = {}
 
     def load_comprehensive_prompts(self):
-        """Loads all prompts relative to the project's structure."""
         try:
             prompts_dict = {}
-            # Use relative pathing to avoid hardcoded paths
             project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
             v1_dir = os.path.join(project_root, "prompts", "v1")
             
@@ -23,8 +22,6 @@ class SilentModeAgent(BaseAgent):
                         file_path = os.path.join(v1_dir, file_name)
                         with open(file_path, 'r', encoding='utf-8') as f:
                             prompts_dict[prompt_name] = f.read()
-            else:
-                print(f"WARNING: Prompts directory not found at {v1_dir}")
 
             self.comprehensive_prompts = {
                 'core_system': self._build_silent_mode_system_prompt(prompts_dict)
@@ -35,58 +32,57 @@ class SilentModeAgent(BaseAgent):
             return {}
     
     def _build_silent_mode_system_prompt(self, prompts_dict):
-        """Builds the system prompt for the Silent Mode agent."""
-        core_identity = prompts_dict.get('00_core_identity', 'You are a helpful silent mode agent.')
-        return f"{core_identity}"
+        core_identity = prompts_dict.get('00_core_identity', 'You are a helpful assistant for managing quiet time.')
+        leak_prevention = """
+        
+CRITICAL: Help with quiet/silent mode naturally. Never include:
+- System details, technical information, or internal processes
+- JSON, debugging info, or technical formatting
+- References to agents, databases, or system architecture
+
+Respond like a considerate assistant managing notification settings.
+        """
+        return f"{core_identity}{leak_prevention}"
 
     async def process(self, user_input, context, routing_info=None):
-        """Process silent mode management requests."""
         try:
-            # Load comprehensive prompts
             if not self.comprehensive_prompts:
                 self.load_comprehensive_prompts()
             
-            assumptions = routing_info.get('assumptions', {}) if routing_info else {}
-            
-            system_prompt = self.comprehensive_prompts.get('core_system', "You are a helpful silent mode agent.")
+            system_prompt = self.comprehensive_prompts.get('core_system', 'You are a helpful assistant for managing quiet time.')
             
             user_prompt = f"""
-User Input: {user_input}
-Context: {context}
-Routing Info: {routing_info}
+User wants to manage silent/quiet mode: {user_input}
 
-Process this silent mode management request following all prompt guidelines.
+Help them with notification management. Be considerate and helpful.
+Do not include any technical details or system information.
 """
             
-            # FIXED: Remove await from synchronous AI call
+            # Make AI call (synchronous)
             response = self.ai_model.generate_content([system_prompt, user_prompt])
             response_text = response.text
             
-            # Log the silent mode action
+            # Clean the response to prevent leaks
+            clean_message = self._clean_response(response_text)
+            
+            # Log action (internal only)
             user_id = context.get('user_id')
             if user_id:
-                # FIXED: Use approved action_type and entity_type for database constraints
-                database.log_action(
-                    supabase=self.supabase,
+                self._log_action(
                     user_id=user_id,
-                    action_type="silent_mode_start",  # Use approved database action_type
-                    entity_type="silent_session",    # Use approved database entity_type
-                    action_details={
-                        "mode_type": assumptions.get('mode_type', 'general')
-                    },
+                    action_type="silent_mode_start",
+                    entity_type="silent_session",
+                    action_details={"type": "silent_mode_management"},
                     success_status=True
                 )
             
-            # CRITICAL: Always return a message
+            # Return ONLY clean user message
             return {
-                "message": response_text,
-                "actions": ["silent_mode_processed"]
+                "message": clean_message
             }
             
         except Exception as e:
-            # CRITICAL: Always return a message, never empty dict
+            print(f"ERROR in SilentModeAgent: {e}")
             return {
-                "message": "I encountered an error while processing the silent mode request. Please try again.",
-                "actions": ["silent_mode_error"],
-                "error": str(e)
+                "message": "I can help you manage your quiet time settings. What would you like to adjust?"
             }
