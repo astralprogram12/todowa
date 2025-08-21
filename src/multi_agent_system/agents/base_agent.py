@@ -1,13 +1,13 @@
 # base_agent.py
-# Fixed version following the universal template
+# Clean version that prevents information leakage
 
-import database_personal as database  # Step 1: Fix the imports
+import database_personal as database
 import os
 
 class BaseAgent:
-    """Base agent class with correct architecture."""
+    """Base agent class with leak-proof architecture."""
 
-    def __init__(self, supabase, ai_model, agent_name=None):  # Step 2: Fix constructor
+    def __init__(self, supabase, ai_model, agent_name=None):
         """Initialize the base agent with correct parameters."""
         self.supabase = supabase
         self.ai_model = ai_model
@@ -15,11 +15,10 @@ class BaseAgent:
         self.prompts = {}
         self.comprehensive_prompts = {}
         
-    def load_comprehensive_prompts(self):  # Step 3: Fix prompt loading logic
+    def load_comprehensive_prompts(self):
         """Loads all prompts relative to the project's structure."""
         try:
             prompts_dict = {}
-            # This code correctly finds your prompts folder
             project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
             v1_dir = os.path.join(project_root, "prompts", "v1")
             
@@ -33,7 +32,6 @@ class BaseAgent:
             else:
                 print(f"WARNING: Prompts directory not found at {v1_dir}")
 
-            # This part can be customized for each agent
             self.comprehensive_prompts = {
                 'core_system': self._build_base_system_prompt(prompts_dict)
             }
@@ -42,10 +40,21 @@ class BaseAgent:
             print(f"Error loading comprehensive prompts: {e}")
             return {}
 
-    def _build_base_system_prompt(self, prompts_dict):  # Customize this helper for each agent
+    def _build_base_system_prompt(self, prompts_dict):
         """Builds the system prompt for the base agent."""
         core_identity = prompts_dict.get('00_core_identity', 'You are a helpful assistant.')
-        return f"{core_identity}"
+        # CRITICAL: Add leak prevention instructions
+        leak_prevention = """
+        
+IMPORTANT: Your response must be ONLY user-friendly text. Never include:
+        - Technical details, system information, or internal data
+        - JSON structures, code blocks, or technical formatting
+        - Action logs, debugging info, or system status
+        - References to internal processes, agents, or system architecture
+        
+        Respond as a helpful assistant would in natural conversation.
+        """
+        return f"{core_identity}{leak_prevention}"
         
     async def process(self, user_input, context, routing_info=None):
         """Process user input and return a response."""
@@ -55,7 +64,6 @@ class BaseAgent:
                    action_details=None, success_status=True, error_details=None):
         """Log an action performed by the agent."""
         try:
-            # Step 5: Fix database calls
             database.log_action(
                 supabase=self.supabase,
                 user_id=user_id,
@@ -68,3 +76,24 @@ class BaseAgent:
             )
         except Exception as e:
             print(f"!!! AGENT LOGGING ERROR: {e}")
+    
+    def _clean_response(self, message):
+        """Ensure response contains ONLY user-friendly content."""
+        if not message:
+            return "I'm here to help! How can I assist you?"
+        
+        # Remove any technical artifacts that might have leaked
+        import re
+        # Remove JSON-like structures
+        message = re.sub(r'\{[^{}]*\}', '', message)
+        # Remove array-like structures
+        message = re.sub(r'\[[^\[\]]*\]', '', message)
+        # Remove technical keywords
+        technical_terms = ['json', 'actions', 'status', 'error', 'debug', 'log', 'system']
+        for term in technical_terms:
+            message = re.sub(f'\\b{term}\\b', '', message, flags=re.IGNORECASE)
+        
+        # Clean up extra whitespace
+        message = ' '.join(message.split())
+        
+        return message.strip() or "I'm here to help! How can I assist you?"

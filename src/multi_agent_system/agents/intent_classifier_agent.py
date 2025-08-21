@@ -1,55 +1,16 @@
-# src/multi_agent_system/agents/intent_classifier_agent.py (Final Corrected Version)
-
 from .base_agent import BaseAgent
 import database_personal as database
 import os
 import json
 
 class IntentClassifierAgent(BaseAgent):
+    """Agent for intent classification without technical leaks."""
+    
     def __init__(self, supabase, ai_model):
         super().__init__(supabase, ai_model, agent_name="IntentClassifierAgent")
         self.comprehensive_prompts = {}
 
-    async def classify_intent(self, user_input, context):
-        """Classifies user intent using an AI model."""
-        try:
-            if not self.comprehensive_prompts:
-                self.load_comprehensive_prompts()
-            
-            system_prompt = self.comprehensive_prompts.get('core_system', "You are an expert at classifying user intent.")
-            user_prompt = self._build_classification_prompt(user_input, context)
-
-            # --- [THE FINAL FIX] ---
-            # REMOVED 'await' because the Gemini library's generate_content method is synchronous.
-            response = self.ai_model.generate_content([system_prompt, user_prompt])
-            # The 'response' object itself is NOT awaitable. Get the text directly.
-            response_text = response.text
-            # --- [END OF FIX] ---
-            
-            # Log the classification action
-            user_id = context.get('user_id')
-            if user_id:
-                database.log_action(
-                    supabase=self.supabase, user_id=user_id, action_type="intent_classified",
-                    entity_type="classification", action_details={"result": response_text[:200]},
-                    success_status=True
-                )
-            
-            parsed_response = self._parse_ai_response(response_text)
-            
-            # Sanity check on the AI's confidence
-            if parsed_response.get("confidence", 0) < 0.5:
-                print("AI confidence is too low. Overriding to ask for clarification.")
-                return self._clarification_fallback(user_input)
-                
-            return parsed_response
-            
-        except Exception as e:
-            print(f"!!! ERROR in IntentClassifierAgent: {e}")
-            return self._clarification_fallback(user_input)
-
     def load_comprehensive_prompts(self):
-        """Loads all prompts relative to the project's structure."""
         try:
             prompts_dict = {}
             project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
@@ -62,59 +23,96 @@ class IntentClassifierAgent(BaseAgent):
                         file_path = os.path.join(v1_dir, file_name)
                         with open(file_path, 'r', encoding='utf-8') as f:
                             prompts_dict[prompt_name] = f.read()
-            else:
-                print(f"WARNING: Prompts directory not found at {v1_dir}")
 
-            self.comprehensive_prompts = {'core_system': self._build_intent_classifier_system_prompt(prompts_dict)}
+            self.comprehensive_prompts = {
+                'core_system': self._build_classifier_system_prompt(prompts_dict)
+            }
             return self.comprehensive_prompts
         except Exception as e:
             print(f"Error loading comprehensive prompts: {e}")
             return {}
     
-    def _build_intent_classifier_system_prompt(self, prompts_dict):
-        """Builds the system prompt for the Intent Classifier agent."""
-        core_identity = prompts_dict.get('00_core_identity', '')
-        decision_tree = prompts_dict.get('09_intelligent_decision_tree', '')
-        return f"{core_identity}\n\n{decision_tree}"
+    def _build_classifier_system_prompt(self, prompts_dict):
+        core_identity = prompts_dict.get('00_core_identity', 'You are an intent classification assistant.')
+        # This agent is internal-only, but still prevent leaks just in case
+        leak_prevention = """
+        
+You classify user intents. Return only classification data, no user-facing messages.
+Never include system details, debugging info, or technical formatting in any output.
+        """
+        return f"{core_identity}{leak_prevention}"
 
-    def _build_classification_prompt(self, user_input, context):
-        """Builds the user part of the prompt for the AI."""
-        return f"""
-Analyze the following user input and conversation history to determine the user's intent.
-
-**User Input:** "{user_input}"
-**Conversation History:** {context.get('history', [])}
-
-**Available Intents:**
-- task, reminder, silent_mode, expert, guide, general, information, clarification_needed
-
-**Instructions:**
-1. Choose the SINGLE most likely intent.
-2. Provide a confidence score from 0.0 to 1.0. If confidence is below 0.5, you MUST choose 'clarification_needed'.
-3. Respond ONLY with a valid JSON object in the specified format.
-
-**Required JSON Response Format:**
-{{
-    "primary_intent": "chosen_intent",
-    "secondary_intents": [],
-    "confidence": 0.0,
-    "reasoning": "Your brief reasoning here."
-}}
-"""
-
-    def _parse_ai_response(self, response_text: str) -> dict:
-        """Safely parses JSON from the AI's raw text response."""
+    async def classify_intent(self, user_input, context):
+        """Classify user intent - internal function, not user-facing."""
         try:
-            json_str = response_text.strip().replace("```json", "").replace("```", "")
-            return json.loads(json_str)
-        except (json.JSONDecodeError, AttributeError):
-            print(f"Failed to parse JSON from AI response: {response_text}")
-            return self._clarification_fallback("")
+            if not self.comprehensive_prompts:
+                self.load_comprehensive_prompts()
+            
+            system_prompt = self.comprehensive_prompts.get('core_system', 'You are an intent classification assistant.')
+            
+            user_prompt = f"""
+Classify this user input: {user_input}
 
-    def _clarification_fallback(self, user_input: str) -> dict:
-        """Returns a default response when classification is impossible."""
+Return JSON with:
+{{
+    "primary_intent": "agent_name",
+    "confidence": 0.8,
+    "assumptions": {{}}
+}}
+
+Available agents: general, task, reminder, information, help, guide, expert, coder, audit, silent_mode, context, preference, action, silent
+"""
+            
+            # Make AI call (synchronous)
+            response = self.ai_model.generate_content([system_prompt, user_prompt])
+            response_text = response.text
+            
+            # Parse the classification (internal processing)
+            try:
+                # Extract JSON from response
+                start = response_text.find('{')
+                end = response_text.rfind('}') + 1
+                if start >= 0 and end > start:
+                    json_str = response_text[start:end]
+                    classification = json.loads(json_str)
+                else:
+                    # Fallback classification
+                    classification = {
+                        "primary_intent": "general",
+                        "confidence": 0.5,
+                        "assumptions": {}
+                    }
+            except Exception as e:
+                print(f"Classification parsing error: {e}")
+                classification = {
+                    "primary_intent": "general", 
+                    "confidence": 0.5,
+                    "assumptions": {}
+                }
+            
+            # Log classification (internal only)
+            user_id = context.get('user_id')
+            if user_id:
+                self._log_action(
+                    user_id=user_id,
+                    action_type="intent_classified",
+                    entity_type="classification",
+                    action_details=classification,
+                    success_status=True
+                )
+            
+            return classification
+            
+        except Exception as e:
+            print(f"ERROR in IntentClassifierAgent: {e}")
+            return {
+                "primary_intent": "general",
+                "confidence": 0.3,
+                "assumptions": {}
+            }
+
+    async def process(self, user_input, context, routing_info=None):
+        """This agent doesn't provide user-facing responses."""
         return {
-            "primary_intent": "clarification_needed",
-            "confidence": 0.1,
-            "reasoning": "Could not confidently determine intent.",
+            "message": "Classification complete."
         }
