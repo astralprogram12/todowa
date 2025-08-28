@@ -233,6 +233,7 @@ ENRICHED DATA PROCESSING INSTRUCTIONS:
 - Make the response feel natural and conversational, not like a technical report.
 - Dont repeat all previous conversation only summarize the recent one
 - Make it brief as possible but not missing any core idea of what to deliver
+- IF it about search, be as detail as possible
 
 
 INFORMATION TO DELIVER (times already converted to user's timezone):

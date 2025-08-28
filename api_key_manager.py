@@ -37,7 +37,7 @@ class ResilientGeminiModel:
         # Configure the model based on whether JSON output is required
         if self._is_json_model:
             self._current_model = genai.GenerativeModel(
-                'gemini-1.5-flash-latest',
+                'gemini-2.5-flash-lite',
                 generation_config={"response_mime_type": "application/json"}
             )
         else:
