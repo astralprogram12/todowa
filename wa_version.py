@@ -219,46 +219,65 @@ class TodowaApp:
             return {'success': False, 'error': str(e), 'results': []}
 
 
-# --- API Routes / Endpoints ---
-@app.route('/webhook', methods=['GET', 'POST'])
-def webhook():
-    if request.method == 'GET':
-        logger.info("Received GET request for webhook verification.")
-        return jsonify({"status": "success", "message": "Webhook is active."}), 200
 
+# --- VERCEL ENTRY POINT ---
+# This 'app' variable is what Vercel looks for.
+app = Flask(__name__)
+chat_app = TodowaApp()
+
+# --- Application Initialization ---
+# It's crucial to initialize the system when the module is loaded.
+logger.info("Starting Todowa application setup for Vercel...")
+if not chat_app.initialize_system():
+    logger.critical("FATAL: Todowa Application failed to initialize. The app will not work.")
+    # The app will still run but will return error messages.
+
+# --- API Routes / Endpoints ---
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    # This is the main webhook for services like WhatsApp, Telegram, etc.
+    # The GET method is often used for a one-time verification by the service.
+    if request.method == 'GET':
+        return jsonify({"status": "verified"}), 200
+        
     sender_phone = None
     try:
         data = request.get_json()
-        if not data:
-            return jsonify({"status": "error", "message": "Invalid JSON"}), 400
+        if not data: return jsonify({"status": "error", "message": "Invalid JSON"}), 400
 
         sender_phone = data.get('sender')
         message_text = data.get('message')
-
         if not sender_phone or not message_text:
             return jsonify({"status": "error", "message": "Missing 'sender' or 'message'"}), 400
 
         user_id = database.get_user_id_by_phone(chat_app.supabase, sender_phone)
-        
         if not user_id:
-            logger.info(f"New sender '{sender_phone}' is not registered. Prompting to sign up.")
             reply = "Welcome! To use this service, please sign up on our website first."
             services.send_fonnte_message(sender_phone, reply)
             return jsonify({"status": "unauthorized_user_prompted"}), 200
 
         is_allowed, limit_message = database.check_and_update_usage(chat_app.supabase, sender_phone, user_id)
         if not is_allowed:
-            logger.warning(f"User '{user_id}' ({sender_phone}) has exceeded their usage limit.")
             services.send_fonnte_message(sender_phone, limit_message)
             return jsonify({"status": "limit_exceeded"}), 429
 
         response_text = asyncio.run(chat_app.process_message_async(message_text, user_id))
         services.send_fonnte_message(sender_phone, response_text)
-        return jsonify({"status": "success", "message_sent": True}), 200
+        return jsonify({"status": "success"}), 200
 
     except Exception as e:
-        logger.critical(f"!!! AN UNEXPECTED ERROR OCCURRED IN WEBHOOK: {e}", exc_info=True)
-        error_reply = "I seem to have run into an unexpected problem. My developers have been notified."
+        logger.critical(f"!!! UNHANDLED ERROR IN WEBHOOK: {e}", exc_info=True)
+        error_reply = "I ran into an unexpected problem and my developers have been notified."
         if sender_phone:
             services.send_fonnte_message(sender_phone, error_reply)
         return jsonify({"status": "internal_server_error"}), 500
+
+@app.route('/', methods=['GET'])
+def health_check():
+    """A simple health check endpoint."""
+    return jsonify({"status": "ok", "initialized": chat_app._is_initialized}), 200
+
+# This block is for LOCAL DEVELOPMENT ONLY. Vercel will ignore it.
+if __name__ == "__main__":
+    logger.info("Starting Flask development server on http://localhost:5001")
+    app.run(host='0.0.0.0', port=5001, debug=True)
