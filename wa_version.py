@@ -160,6 +160,13 @@ class TodowaApp:
                 logger.warning(f"Master Planner failed to create a plan for: '{message}'. Falling back.")
                 user_context = await self._build_user_context(user_id)
                 agent_response = self.fallback_agent.process_command(user_command=message, user_context=user_context)
+                
+                # --- FIX IS HERE ---
+                # Ensure the user_context is passed along to the AnsweringAgent.
+                if 'user_context' not in agent_response:
+                    agent_response['user_context'] = user_context
+                # --- END OF FIX ---
+                
                 final_response_text = self.answering_agent.process_response(agent_response)
                 return final_response_text
 
@@ -194,6 +201,12 @@ class TodowaApp:
                 if route_to in agent_map:
                     agent_response = agent_map[route_to](user_command=clarified_command, user_context=user_context)
                     if agent_response:
+                        # --- FIX IS HERE ---
+                        # Ensure every agent response includes the user_context before being stored.
+                        if 'user_context' not in agent_response:
+                            agent_response['user_context'] = user_context
+                        # --- END OF FIX ---
+                        
                         all_agent_responses.append(agent_response)
                         all_actions_to_execute.extend(agent_response.get('actions', []))
             
