@@ -245,12 +245,3 @@ def webhook():
             services.send_fonnte_message(sender_phone, error_reply)
         return jsonify({"status": "internal_server_error"}), 500
 
-@app.route('/health', methods=['GET'])
-def health_check():
-    """A simple health check endpoint to verify the service is running."""
-    return jsonify({"status": "ok", "initialized": chat_app._is_initialized}), 200
-
-# --- Main Execution Block ---
-if __name__ == "__main__":
-    logger.info("Starting Flask development server...")
-    app.run(host='0.0.0.0', port=5001, debug=True)

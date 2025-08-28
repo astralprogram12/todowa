@@ -4,6 +4,6 @@ google-generativeai
 croniter
 pytz
 dateparser
-duckduckgo_search
+ddgs
 
 
