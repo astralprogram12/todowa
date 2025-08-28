@@ -3,6 +3,7 @@ import os
 import sys
 import logging
 import asyncio
+from datetime import datetime
 from typing import Dict, Any, List
 
 # --- Third-Party Imports ---
@@ -48,6 +49,34 @@ except ImportError as e:
     sys.exit(1)
 
 
+# --- CHANGE 1: The robust ConversationHistory class is restored and integrated ---
+class ConversationHistory:
+    """
+    Stores structured conversation history locally in memory for a single session.
+    Perfectly suited for a productivity app that needs context on actions, not just chat.
+    """
+    def __init__(self):
+        self.history: List[Dict[str, Any]] = []
+        self.max_history = 5  # Keeps the last 5 full turns
+        self.turn_counter = 0
+    
+    def add_interaction(self, user_input: str, clarified_input: str, response: Any):
+        self.turn_counter += 1
+        interaction = {
+            'timestamp': datetime.now().isoformat(),
+            'user_input': user_input,
+            'clarified_input': clarified_input,
+            'response': str(response) if response is not None else '',
+            'conversation_turn': self.turn_counter
+        }
+        self.history.append(interaction)
+        if len(self.history) > self.max_history:
+            self.history = self.history[-self.max_history:]
+    
+    def get_recent_context(self) -> List[Dict[str, Any]]:
+        return self.history.copy()
+
+
 # --- The Core Application Logic Class ---
 class TodowaApp:
     def __init__(self):
@@ -62,6 +91,8 @@ class TodowaApp:
         self.fallback_agent: GeneralFallbackAgent = None
         self.answering_agent: AnsweringAgent = None
         self._is_initialized = False
+        # --- CHANGE 2: The history manager now uses your structured class ---
+        self.user_histories: Dict[str, ConversationHistory] = {}
 
     def initialize_system(self) -> bool:
         # This initialization logic is correct and does not need to be changed.
@@ -99,36 +130,45 @@ class TodowaApp:
 
     async def process_message_async(self, message: str, user_id: str) -> str:
         """
-        Asynchronously processes a user message using the Master Planner architecture.
+        Asynchronously processes a user message using the Master Planner architecture
+        and a robust, structured conversation history.
         """
         if not self._is_initialized:
             return "❌ The server is not properly initialized. Please contact support."
 
+        final_response_text = ""
+        clarified_summary = ""
         try:
             db_manager = DatabaseManager(self.supabase, user_id)
             logger.info(f"💬 Processing for user '{user_id}': '{message}'")
             
-            # --- STEP 1: The "Planner" Call ---
-            # The ContextResolutionAgent acts as a Master Planner, creating a multi-step plan.
-            # This assumes you have updated the agent with a new prompt and a method like 'create_execution_plan'.
-            execution_plan = self.context_agent.create_execution_plan(message)
+            # --- CHANGE 3: Get or create the dedicated history manager for the user ---
+            history_manager = self.user_histories.setdefault(user_id, ConversationHistory())
+            conversation_history = history_manager.get_recent_context()
+
+            # The Master Planner receives the rich, structured history
+            execution_plan = self.context_agent.resolve_context(message, conversation_history)
             sub_tasks = execution_plan.get('sub_tasks', [])
+
+            # Create a summary of clarified commands for history logging
+            if sub_tasks:
+                clarified_summary = "; ".join([task.get('clarified_command', '') for task in sub_tasks])
+            else:
+                clarified_summary = message # Fallback if no plan was made
 
             if not sub_tasks:
                 logger.warning(f"Master Planner failed to create a plan for: '{message}'. Falling back.")
-                # If the planner fails, you can fall back to a simpler agent or a default response.
                 user_context = await self._build_user_context(user_id)
-                return self.fallback_agent.process_command(user_command=message, user_context=user_context)
+                agent_response = self.fallback_agent.process_command(user_command=message, user_context=user_context)
+                final_response_text = self.answering_agent.process_response(agent_response)
+                return final_response_text
 
-            # --- STEP 2: The Anti-Abuse Mechanism ---
-            # Enforce a hard limit on the number of sub-tasks to process per command.
             TASK_LIMIT = 3
             if len(sub_tasks) > TASK_LIMIT:
                 logger.warning(f"User command generated {len(sub_tasks)} sub-tasks. Processing the first {TASK_LIMIT} to prevent abuse.")
                 sub_tasks = sub_tasks[:TASK_LIMIT]
             
-            all_agent_responses = []
-            all_actions_to_execute = []
+            all_agent_responses, all_actions_to_execute = [], []
             
             agent_map = {
                 "TaskAgent": self.task_agent.process_command,
@@ -140,55 +180,52 @@ class TodowaApp:
             }
 
             user_context = await self._build_user_context(user_id)
+            user_context['conversation_history'] = conversation_history
 
-            # --- STEP 3: The "Worker" Phase ---
-            # Loop through the controlled plan and execute each step with the correct specialist.
             for task in sub_tasks:
                 clarified_command = task.get('clarified_command')
                 route_to = task.get('route_to')
                 
                 if not clarified_command or not route_to:
-                    logger.warning(f"Skipping malformed sub-task from planner: {task}")
                     continue
 
                 logger.info(f"  - Sub-task: '{clarified_command}' -> Routing to: {route_to}")
                 
                 if route_to in agent_map:
-                    # Each specialist agent processes its own part of the command.
-                    agent_response = agent_map[route_to](
-                        user_command=clarified_command, 
-                        user_context=user_context
-                    )
+                    agent_response = agent_map[route_to](user_command=clarified_command, user_context=user_context)
                     if agent_response:
                         all_agent_responses.append(agent_response)
                         all_actions_to_execute.extend(agent_response.get('actions', []))
-                else:
-                    logger.warning(f"  - Skipping unknown route specified by planner: {route_to}")
             
-            # --- STEP 4: Execute all collected actions in one batch ---
             execution_result = {}
             if all_actions_to_execute:
-                logger.info(f"▶️ Executing a total of {len(all_actions_to_execute)} action(s) from the plan...")
                 execution_result = await self._execute_json_actions(user_id, all_actions_to_execute, db_manager)
 
-            # --- STEP 5: Consolidate and Generate Final Response ---
-            # The AnsweringAgent synthesizes a single, coherent response from all the work done.
-            # This assumes you will add a 'process_multi_response' method to your AnsweringAgent.
             final_response_context = {
                 'source': 'MultiAgentExecution',
                 'original_command': message,
-                'agent_responses': all_agent_responses, # Pass all individual agent outputs
+                'agent_responses': all_agent_responses,
                 'execution_result': execution_result,
                 'user_context': user_context,
             }
-            return self.answering_agent.process_multi_response(final_response_context)
+            final_response_text = self.answering_agent.process_multi_response(final_response_context)
+            return final_response_text
 
         except Exception as e:
-            logger.error(f"❌ An unexpected error occurred while processing message for user '{user_id}': {e}", exc_info=True)
-            return self.answering_agent.process_error("I seem to have run into an unexpected problem. My developers have been notified.")
+            logger.error(f"❌ An unexpected error occurred for user '{user_id}': {e}", exc_info=True)
+            final_response_text = self.answering_agent.process_error("I ran into an unexpected problem.")
+            return final_response_text
+        finally:
+            # --- CHANGE 4: Use the dedicated history manager to log the full, structured interaction ---
+            history_manager = self.user_histories.setdefault(user_id, ConversationHistory())
+            history_manager.add_interaction(
+                user_input=message,
+                clarified_input=clarified_summary,
+                response=final_response_text
+            )
+            logger.info(f"Interaction logged for user '{user_id}'. History size: {len(history_manager.history)} turns.")
 
     async def _build_user_context(self, user_id: str) -> Dict[str, Any]:
-        # This method is correct and does not need to be changed.
         context = {
             'user_info': {'timezone': 'GMT+7', 'user_id': user_id},
             'ai_brain': []
@@ -196,7 +233,6 @@ class TodowaApp:
         if not self.supabase:
             return context
         try:
-            # Assuming supabase client is async-compatible
             brain_result = await self.supabase.table('ai_brain_memories').select('*').eq('user_id', user_id).limit(10).execute()
             if brain_result.data:
                 context['ai_brain'] = brain_result.data
@@ -205,7 +241,6 @@ class TodowaApp:
         return context
     
     async def _execute_json_actions(self, user_id: str, actions: List[Dict[str, Any]], db_manager: DatabaseManager) -> Dict[str, Any]:
-        # This method is correct and does not need to be changed.
         if not actions: return {'success': True, 'results': []}
         try:
             executor = ActionExecutor(db_manager, user_id)
@@ -218,25 +253,18 @@ class TodowaApp:
             logger.error(f"❌ Action execution failed for user '{user_id}': {e}", exc_info=True)
             return {'success': False, 'error': str(e), 'results': []}
 
-
-
-# --- VERCEL ENTRY POINT ---
-# This 'app' variable is what Vercel looks for.
+# --- Flask Web Server Setup ---
 app = Flask(__name__)
 chat_app = TodowaApp()
 
 # --- Application Initialization ---
-# It's crucial to initialize the system when the module is loaded.
 logger.info("Starting Todowa application setup for Vercel...")
 if not chat_app.initialize_system():
     logger.critical("FATAL: Todowa Application failed to initialize. The app will not work.")
-    # The app will still run but will return error messages.
 
 # --- API Routes / Endpoints ---
-@app.route('/webhook', methods=['POST'])
+@app.route('/webhook', methods=['POST', 'GET'])
 def webhook():
-    # This is the main webhook for services like WhatsApp, Telegram, etc.
-    # The GET method is often used for a one-time verification by the service.
     if request.method == 'GET':
         return jsonify({"status": "verified"}), 200
         
