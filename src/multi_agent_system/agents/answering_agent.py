@@ -231,6 +231,7 @@ ENRICHED DATA PROCESSING INSTRUCTIONS:
 - If processing a single action, explain the result of that action.
 - For journal operations: explain categorization reasoning, title selection, and content insights.
 - Make the response feel natural and conversational, not like a technical report.
+- ALWAYS REPORT SEARCH ANSWER IN AS MUCH DETAIL AS POSIBLE IN STUCTURED WAY *OVERIDE USER PREFFERENCE
 
 
 INFORMATION TO DELIVER (times already converted to user's timezone):
