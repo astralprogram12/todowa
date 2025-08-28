@@ -218,8 +218,47 @@ class TodowaApp:
             logger.error(f"❌ Action execution failed for user '{user_id}': {e}", exc_info=True)
             return {'success': False, 'error': str(e), 'results': []}
 
-# --- Flask Web Server Setup ---
-# The Flask app, initialization, and webhook logic remain the same.
-# They are already designed to call the `process_message_async` method, which
-# now contains our new, more powerful logic.
-# ... (Your existing Flask code from @app.route('/webhook') onwards) ...
+
+# --- API Routes / Endpoints ---
+@app.route('/webhook', methods=['GET', 'POST'])
+def webhook():
+    if request.method == 'GET':
+        logger.info("Received GET request for webhook verification.")
+        return jsonify({"status": "success", "message": "Webhook is active."}), 200
+
+    sender_phone = None
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"status": "error", "message": "Invalid JSON"}), 400
+
+        sender_phone = data.get('sender')
+        message_text = data.get('message')
+
+        if not sender_phone or not message_text:
+            return jsonify({"status": "error", "message": "Missing 'sender' or 'message'"}), 400
+
+        user_id = database.get_user_id_by_phone(chat_app.supabase, sender_phone)
+        
+        if not user_id:
+            logger.info(f"New sender '{sender_phone}' is not registered. Prompting to sign up.")
+            reply = "Welcome! To use this service, please sign up on our website first."
+            services.send_fonnte_message(sender_phone, reply)
+            return jsonify({"status": "unauthorized_user_prompted"}), 200
+
+        is_allowed, limit_message = database.check_and_update_usage(chat_app.supabase, sender_phone, user_id)
+        if not is_allowed:
+            logger.warning(f"User '{user_id}' ({sender_phone}) has exceeded their usage limit.")
+            services.send_fonnte_message(sender_phone, limit_message)
+            return jsonify({"status": "limit_exceeded"}), 429
+
+        response_text = asyncio.run(chat_app.process_message_async(message_text, user_id))
+        services.send_fonnte_message(sender_phone, response_text)
+        return jsonify({"status": "success", "message_sent": True}), 200
+
+    except Exception as e:
+        logger.critical(f"!!! AN UNEXPECTED ERROR OCCURRED IN WEBHOOK: {e}", exc_info=True)
+        error_reply = "I seem to have run into an unexpected problem. My developers have been notified."
+        if sender_phone:
+            services.send_fonnte_message(sender_phone, error_reply)
+        return jsonify({"status": "internal_server_error"}), 500
