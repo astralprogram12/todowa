@@ -46,24 +46,21 @@ class AnsweringAgent:
         if not agent_responses:
             return "I've processed your request, but there's nothing specific to report back."
 
-        # If, for some reason, only one agent ended up running, use the simpler, more detailed processor.
-        if len(agent_responses) == 1:
-            return self.process_response(agent_responses[0])
-        
-        # For multiple responses, we create a consolidated information package for the AI.
-        # This is more efficient than calling the AI for each individual response.
+        # CONSOLIDATE ALWAYS, REMOVING THE BUGGY `if len == 1` check.
         consolidated_info = {
             "original_command": context.get("original_command"),
             "summary_of_outcomes": [res.get("response", "An action was completed.") for res in agent_responses],
-            "execution_details": context.get("execution_result")
+            "execution_details": context.get("execution_result"),
+            "raw_agent_responses": agent_responses # Optional, but good for debugging
         }
-        
-        # Now, we use the standard processing pipeline with this consolidated data.
+
+        # Now, use the standard processing pipeline with this consolidated data.
         return self.process_response({
             "source": "MultiAgentExecution",
             "message": "Synthesize the following outcomes into a single, user-friendly summary.",
             "processing_context": consolidated_info,
             "user_context": context.get("user_context")
+
         })
 
     # --- NEW METHOD: process_error ---
