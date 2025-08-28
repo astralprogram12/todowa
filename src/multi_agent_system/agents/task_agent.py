@@ -332,24 +332,62 @@ class TaskAgent:
 
 User Command: "{user_command}"
 
+**CRITICAL GOAL:** Your most important job is to distinguish between a command for a SINGLE task versus a command for MULTIPLE tasks (a "batch_operation"). Commands that list several items separated by commas or "and", or use words like "all" or "every", are almost always a 'batch_operation'.
+
 **Definitions:**
 - `intent`: One of 'create_task', 'list_tasks', 'update_task', 'complete_task', 'delete_task', 'batch_operation'.
 - `title`: (For create_task) The main subject.
 - `title_match`: (For single task ops) The title of the task to modify.
 - `patch`: (For update_task) A dictionary of changes.
-- `operation`: (For batch) The action: 'create', 'delete', or 'complete'.
-- `tasks_to_create`: (For batch create) A list of new task objects.
-- `filters`: A dictionary.
-    - For smart filters, it should contain a `description` key with the user's natural language query.
-    - It can also contain a `status` key ('todo' or 'done'). If not specified, the default is 'todo'.
+- `operation`: (For batch) The action: 'create', 'delete', 'complete', or 'update'.
+- `tasks_to_create`: (For batch create) A list of new task objects, each with a 'title' and optional 'due_date'.
+- `filters`: A dictionary with a `description` of the tasks to find.
 
-**Examples:**
-- "list my tasks related to creating design" -> {{"intent": "list_tasks", "filters": {{"description": "tasks related to creating design", "status": "todo"}}}}
-- "show me my completed tasks for the 'Website Launch' project" -> {{"intent": "list_tasks", "filters": {{"description": "tasks for the 'Website Launch' project", "status": "done"}}}}
-- "delete all my work tasks" -> {{"intent": "batch_operation", "operation": "delete", "filters": {{"description": "all work tasks", "status": "todo"}}}}
-- "add three tasks: call the plumber, buy groceries, and email a status update" -> {{"intent": "batch_operation", "operation": "create", "tasks_to_create": [{{"title": "call the plumber"}}, {{"title": "buy groceries"}}, {{"title": "email a status update"}}]}}
+---
+**EXAMPLES**
+---
 
-Respond with ONLY a valid JSON object.
+### --- BATCH CREATION (Multiple Tasks) ---
+# Note: These commands create several tasks at once.
+
+# Implicit batch creation with deadlines (the original problem case)
+- "test 1 deadline hari ini, test 2 deadline besok, test 3 deadline lusa" -> {{"intent": "batch_operation", "operation": "create", "tasks_to_create": [{{"title": "test 1", "due_date": "hari ini"}}, {{"title": "test 2", "due_date": "besok"}}, {{"title": "test 3", "due_date": "lusa"}}]}}
+
+# Explicit batch creation with natural language
+- "add two tasks: schedule the annual review and book a flight to Jakarta" -> {{"intent": "batch_operation", "operation": "create", "tasks_to_create": [{{"title": "schedule the annual review"}}, {{"title": "book a flight to Jakarta"}}]}}
+
+# Simple implicit list
+- "buy milk, walk the dog, pay the electricity bill" -> {{"intent": "batch_operation", "operation": "create", "tasks_to_create": [{{"title": "buy milk"}}, {{"title": "walk the dog"}}, {{"title": "pay the electricity bill"}}]}}
+
+### --- BATCH MODIFICATION (Multiple Tasks) ---
+# Note: These commands modify existing tasks that match a description.
+
+# Batch deletion using a filter
+- "delete all the tasks that contain the word 'Project'" -> {{"intent": "batch_operation", "operation": "delete", "filters": {{"description": "all tasks that contain the word 'Project'", "status": "todo"}}}}
+
+# Batch completion using a filter
+- "finish all my tasks for the 'Website Launch' initiative" -> {{"intent": "batch_operation", "operation": "complete", "filters": {{"description": "tasks for the 'Website Launch' initiative", "status": "todo"}}}}
+
+# Intricate batch update using a filter
+- "change all my 'work' tasks to the 'project-alpha' category" -> {{"intent": "batch_operation", "operation": "update", "filters": {{"description": "all 'work' tasks"}}, "patch": {{"category": "project-alpha"}}}}
+
+### --- SINGLE TASK OPERATIONS ---
+# Note: These commands target only one specific task.
+
+# Simple single task creation
+- "remind me to call the doctor's office tomorrow at 10am" -> {{"intent": "create_task", "title": "call the doctor's office", "due_date": "tomorrow at 10am"}}
+
+# Complex single task update with a clear title match
+- "update the deadline for 'Submit Q3 Financial Report' to next Friday EOD" -> {{"intent": "update_task", "title_match": "Submit Q3 Financial Report", "patch": {{"due_date": "next Friday EOD"}}}}
+
+# Single task completion
+- "mark 'Finalize presentation slides' as done" -> {{"intent": "complete_task", "title_match": "Finalize presentation slides"}}
+
+# Listing tasks (always a single operation, but can return multiple results)
+- "show me my high priority tasks for this week" -> {{"intent": "list_tasks", "filters": {{"description": "high priority tasks for this week", "status": "todo"}}}}
+---
+
+Now, analyze the user's command carefully based on these detailed examples. Respond with ONLY a valid JSON object.
 """
 
     def _build_batch_filter_prompt(self, filter_description: str, tasks: List[Dict], user_context: Dict) -> str:

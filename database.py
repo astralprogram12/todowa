@@ -204,12 +204,11 @@ class DatabaseManager:
         return bool(self._handle_db_response(res, f"Failed to delete schedule {schedule_id}"))
     
     # --- Journal Table Operations ---
-
     def create_journal_entry_in_db(self, title: str, content: str, category: str, entry_type: str) -> Dict[str, Any]:
         if not title or not content:
             raise ValueError("Journal title and content cannot be empty.")
         entry_data = {
-            "user_id": self.user_id, # CORRECTED: Use self.user_id
+            "user_id": self.user_id,
             "title": title, 
             "content": content,
             "category": category.lower(), 
@@ -229,16 +228,49 @@ class DatabaseManager:
             .execute()
         return self._handle_db_response(res, f"No journal entries found for titles: {titles}")
 
-    def update_journal_entry_in_db(self, title_match: str, patch: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Updates journal entries that have an exact title match."""
+    def update_journal_entry_in_db(self, patch: Dict[str, Any], id: Optional[int] = None, title_match: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Updates journal entries based on a unique ID or an exact title match.
+        The ID is the preferred and safer method.
+        """
         patch["updated_at"] = datetime.now(timezone.utc).isoformat()
-        res = self.supabase.table("journals").update(patch).eq("user_id", self.user_id).eq("title", title_match).execute()
-        return self._handle_db_response(res, f"Failed to update journal entry with title: {title_match}")
+        
+        query = self.supabase.table("journals").update(patch).eq("user_id", self.user_id)
+        
+        # Build the query based on the provided identifier
+        if id is not None:
+            query = query.eq("id", id)
+            identifier_text = f"ID: {id}"
+        elif title_match is not None:
+            query = query.eq("title", title_match)
+            identifier_text = f"title: {title_match}"
+        else:
+            # This case is already handled by the tool, but it's good practice
+            raise ValueError("No identifier (id or title_match) provided for update.")
 
-    def delete_journal_entry_in_db(self, title_match: str) -> List[Dict[str, Any]]:
-        """Deletes journal entries that have an exact title match."""
-        res = self.supabase.table('journals').delete().eq('user_id', self.user_id).eq('title', title_match).execute()
-        return self._handle_db_response(res, f"Failed to delete journal entry with title: {title_match}")
+        res = query.execute()
+        return self._handle_db_response(res, f"Failed to update journal entry with {identifier_text}")
+
+    def delete_journal_entry_in_db(self, id: Optional[int] = None, title_match: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Deletes journal entries based on a unique ID or an exact title match.
+        The ID is the preferred and safer method.
+        """
+        query = self.supabase.table('journals').delete().eq('user_id', self.user_id)
+
+        # Build the query based on the provided identifier
+        if id is not None:
+            query = query.eq("id", id)
+            identifier_text = f"ID: {id}"
+        elif title_match is not None:
+            query = query.eq("title", title_match)
+            identifier_text = f"title: {title_match}"
+        else:
+            raise ValueError("No identifier (id or title_match) provided for deletion.")
+            
+        res = query.execute()
+        return self._handle_db_response(res, f"Failed to delete journal entry with {identifier_text}")
+    
     # --- AI Brain (Memory) Table Operations ---
 
     def create_or_update_memory(self, memory_type: str, data: Dict, content: str, importance: int = 10) -> Dict[str, Any]:

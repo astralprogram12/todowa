@@ -168,24 +168,15 @@ def get_task_stats(db_manager: DatabaseManager):
 # ==================== JOURNAL TOOLS (NOW RESILIENT) ====================
 
 ### <<< THIS IS THE CRITICAL FIX >>> ###
+
 @tool(name="create_journal_entry", category="journal")
 @db_tool_handler
 def create_journal_entry(db_manager: DatabaseManager, content: Optional[str] = None, title: Optional[str] = None, category: str = "general", entry_type: str = 'free_form') -> Dict:
-    """
-    Creates a new journal entry. Handles missing title or content by creating defaults.
-    """
-    # 1. Validate that we have *something* to save.
+    """Creates a new journal entry. Handles missing title or content by creating defaults."""
     if not content and not title:
         raise ValueError("Cannot create a journal entry with no title or content.")
-
-    # 2. If content is missing, use the title. If both are present, content takes priority from the LLM.
     final_content = content or title
-    
-    # 3. If title is missing, create a sensible default from the content.
     final_title = title or f"Note: {final_content[:40]}..."
-    
-    # 4. Now, call the database manager with guaranteed-to-exist values.
-    #    (This may require a small change in your DatabaseManager method as well).
     return db_manager.create_journal_entry_in_db(
         title=final_title, 
         content=final_content, 
@@ -200,17 +191,27 @@ def search_journal_entries(db_manager: DatabaseManager, titles: List[str], limit
 
 @tool(name="update_journal_entry", category="journal")
 @db_tool_handler
-def update_journal_entry(db_manager: DatabaseManager, titleMatch: str, patch: dict) -> List[Dict]:
-    """Updates a journal entry found by its exact title."""
-    # The argument passed to the db manager must also be updated.
-    return db_manager.update_journal_entry_in_db(title_match=titleMatch, patch=patch)
+def update_journal_entry(db_manager: DatabaseManager, patch: dict, id: Optional[int] = None, titleMatch: Optional[str] = None) -> List[Dict]:
+    """
+    Updates a journal entry. Prefers using the unique 'id' if provided. 
+    Falls back to using 'titleMatch' if 'id' is not available.
+    """
+    if not id and not titleMatch:
+        raise ValueError("You must provide either an 'id' or a 'titleMatch' to update an entry.")
+    
+    return db_manager.update_journal_entry_in_db(id=id, title_match=titleMatch, patch=patch)
 
 @tool(name="delete_journal_entry", category="journal")
 @db_tool_handler
-def delete_journal_entry(db_manager: DatabaseManager, titleMatch: str) -> List[Dict]:
-    """Deletes a journal entry found by its exact title."""
-    # The argument passed to the db manager must also be updated.
-    return db_manager.delete_journal_entry_in_db(title_match=titleMatch)
+def delete_journal_entry(db_manager: DatabaseManager, id: Optional[int] = None, titleMatch: Optional[str] = None) -> List[Dict]:
+    """
+    Deletes a journal entry. Prefers using the unique 'id' if provided.
+    Falls back to using 'titleMatch' if 'id' is not available.
+    """
+    if not id and not titleMatch:
+        raise ValueError("You must provide either an 'id' or a 'titleMatch' to delete an entry.")
+
+    return db_manager.delete_journal_entry_in_db(id=id, title_match=titleMatch)
 
 # ==================== AI BRAIN (MEMORY) TOOLS ====================
 # These are already robust and need no changes.
