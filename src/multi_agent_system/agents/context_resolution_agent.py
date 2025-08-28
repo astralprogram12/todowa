@@ -1,17 +1,15 @@
-"""
 ### NEW: Context Resolution Agent (Master Router) V2
-This agent acts as the central dispatcher for the system. It intelligently
-clarifies user input and routes the command to the appropriate specialized agent.
-This version has been enhanced with time-awareness to improve routing accuracy.
+# This agent acts as the central dispatcher for the system. It intelligently
+# clarifies user input and routes the command to the appropriate specialized agent.
+# This version has been enhanced with time-awareness to improve routing accuracy.
 
-CAPABILITIES:
-- 🌍 Polyglot Language Master: Excels in English, Indonesian, Spanish, etc.
-- 🔤 Intelligent Typo Correction: Handles misspellings and informal writing.
-- 🧠 Smart Pattern Recognition: Understands intent over literal text (e.g., "nevermind", corrections).
-- 🎯 Direct-to-Agent Routing: Determines the correct specialized agent to handle a request.
-- 🕒 **Time & Scheduling Awareness**: Recognizes dates, times, and recurring patterns
-  (e.g., "tomorrow", "at 5pm", "every Friday") to accurately route to the TaskAgent.
-"""
+# CAPABILITIES:
+# - 🌍 Polyglot Language Master: Excels in English, Indonesian, Spanish, etc.
+# - 🔤 Intelligent Typo Correction: Handles misspellings and informal writing.
+# - 🧠 Smart Pattern Recognition: Understands intent over literal text (e.g., "nevermind", corrections).
+# - 🎯 Direct-to-Agent Routing: Determines the correct specialized agent to handle a request.
+# - 🕒 **Time & Scheduling Awareness**: Recognizes dates, times, and recurring patterns
+#   (e.g., "tomorrow", "at 5pm", "every Friday") to accurately route to the TaskAgent.
 
 import logging
 import json
@@ -81,7 +79,7 @@ class ContextResolutionAgent:
                 return {'clarified_command': "NEEDS_CLARIFICATION", 'route_to': None}
             
             logger.info(f"🤖 Routed: '{user_input}' -> '{clarified_command}' | Route: {route_to}")
-            return {'clarified_command': clarified_command, 'route_to': route_to}
+            return ai_result # Return the full result
 
         except Exception as e:
             logger.exception(f"❌ Context clarification and routing failed: {e}")
@@ -146,13 +144,15 @@ class ContextResolutionAgent:
         {{
         "route_to": "SelectedAgentName",
         "clarified_command": "The fully resolved and annotated user command as a string.",
-        "original_message": "The user's verbatim message."
+        "latest_user_message": "The user's most recent, verbatim message.",
+        "latest_system_reply": "The system's last reply from the previous turn. Empty string if no history.",
+        "previous_user_message": "The user's message from the previous turn. Empty string if no history."
         }}
         ```
         ---
         ### **EXPERT EXAMPLES (Study these carefully)**
 
-        **Category 1: Simple & Direct Commands**
+        **Category 1: Simple & Direct Commands (No History)**
 
         *   **Example 1.1 (Task):**
             *   **User Message**: "add task buy milk and eggs"
@@ -161,7 +161,9 @@ class ContextResolutionAgent:
                 {{
                 "route_to": "TaskAgent",
                 "clarified_command": "add task: buy milk and eggs",
-                "original_message": "add task buy milk and eggs"
+                "latest_user_message": "add task buy milk and eggs",
+                "latest_system_reply": "",
+                "previous_user_message": ""
                 }}
                 ```
         *   **Example 1.2 (Schedule):**
@@ -171,32 +173,38 @@ class ContextResolutionAgent:
                 {{
                 "route_to": "ScheduleAgent",
                 "clarified_command": "remind to check the oven in 20 minutes",
-                "original_message": "remind me to check the oven in 20 minutes"
+                "latest_user_message": "remind me to check the oven in 20 minutes",
+                "latest_system_reply": "",
+                "previous_user_message": ""
                 }}
                 ```
 
-        **Category 2: Contextual Resolution**
+        **Category 2: Contextual Resolution (With History)**
 
         *   **Example 2.1 (Pronoun Resolution):**
-            *   **History**: `[ASSISTANT]: I've created the task 'Call plumber'.`
+            *   **History**: `[USER]: create a task to call the plumber` `[ASSISTANT]: I've created the task 'Call plumber'.`
             *   **User Message**: "add to it that it's for the kitchen sink"
             *   **JSON**:
                 ```json
                 {{
                 "route_to": "TaskAgent",
                 "clarified_command": "update the task 'Call plumber' to add the note 'it is for the kitchen sink'",
-                "original_message": "add to it that it's for the kitchen sink"
+                "latest_user_message": "add to it that it's for the kitchen sink",
+                "latest_system_reply": "I've created the task 'Call plumber'.",
+                "previous_user_message": "create a task to call the plumber"
                 }}
                 ```
         *   **Example 2.2 (Plural Resolution):**
-            *   **History**: `[ASSISTANT]: You have 2 tasks: 'Call plumber' and 'Email report'.`
+            *   **History**: `[USER]: what are my tasks?` `[ASSISTANT]: You have 2 tasks: 'Call plumber' and 'Email report'.`
             *   **User Message**: "complete them both"
             *   **JSON**:
                 ```json
                 {{
                 "route_to": "TaskAgent",
                 "clarified_command": "complete the following 2 tasks: 'Call plumber' and 'Email report'",
-                "original_message": "complete them both"
+                "latest_user_message": "complete them both",
+                "latest_system_reply": "You have 2 tasks: 'Call plumber' and 'Email report'.",
+                "previous_user_message": "what are my tasks?"
                 }}
                 ```
 
@@ -209,18 +217,22 @@ class ContextResolutionAgent:
                 {{
                 "route_to": "JournalAgent",
                 "clarified_command": "Update Rina's house location to Bandung. The word 'pindah' (moved) implies this is a change from a previously stored address.",
-                "original_message": "rumah rina pindah ke bandung"
+                "latest_user_message": "rumah rina pindah ke bandung",
+                "latest_system_reply": "",
+                "previous_user_message": ""
                 }}
                 ```
         *   **Example 3.2 (Implied Action):**
-            *   **History**: `[ASSISTANT]: I found a note titled 'Rina's Phone Number'.`
+            *   **History**: `[USER]: search for Rina's contact` `[ASSISTANT]: I found a note titled 'Rina's Phone Number'.`
             *   **User Message**: "ok tell me"
             *   **JSON**:
                 ```json
                 {{
                 "route_to": "JournalAgent",
                 "clarified_command": "The user wants to see the content of the note 'Rina's Phone Number' that was just mentioned.",
-                "original_message": "ok tell me"
+                "latest_user_message": "ok tell me",
+                "latest_system_reply": "I found a note titled 'Rina's Phone Number'.",
+                "previous_user_message": "search for Rina's contact"
                 }}
                 ```
 
@@ -233,37 +245,21 @@ class ContextResolutionAgent:
                 {{
                 "route_to": "FindingAgent",
                 "clarified_command": "who is the current president of indonesia?",
-                "original_message": "who is the current president of indonesia?"
+                "latest_user_message": "who is the current president of indonesia?",
+                "latest_system_reply": "",
+                "previous_user_message": ""
                 }}
                 ```
-        *   **Example 4.2 (FindingAgent - Personal Data):**
-            *   **User Message**: "search my notes for 'Project Phoenix'"
-            *   **JSON**:
-                ```json
-                {{
-                "route_to": "FindingAgent",
-                "clarified_command": "search my notes for 'Project Phoenix'",
-                "original_message": "search my notes for 'Project Phoenix'"
-                }}
-                ```
-        *   **Example 4.3 (GeneralFallback - Advice):**
+        *   **Example 4.2 (GeneralFallback - Advice):**
             *   **User Message**: "i feel unproductive, what should i do?"
             *   **JSON**:
                 ```json
                 {{
                 "route_to": "GeneralFallback",
                 "clarified_command": "i feel unproductive, what should i do?",
-                "original_message": "i feel unproductive, what should i do?"
-                }}
-                ```
-        *   **Example 4.4 (GeneralFallback - Creative):**
-            *   **User Message**: "write a short poem about a robot learning to dream"
-            *   **JSON**:
-                ```json
-                {{
-                "route_to": "GeneralFallback",
-                "clarified_command": "write a short poem about a robot learning to dream",
-                "original_message": "write a short poem about a robot learning to dream"
+                "latest_user_message": "i feel unproductive, what should i do?",
+                "latest_system_reply": "",
+                "previous_user_message": ""
                 }}
                 ```
 
@@ -276,7 +272,9 @@ class ContextResolutionAgent:
                 {{
                 "route_to": "BrainAgent",
                 "clarified_command": "set user preference for communication language to Bahasa Indonesia",
-                "original_message": "from now on, always reply in Bahasa Indonesia"
+                "latest_user_message": "from now on, always reply in Bahasa Indonesia",
+                "latest_system_reply": "",
+                "previous_user_message": ""
                 }}
                 ```
         """
