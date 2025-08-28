@@ -173,12 +173,15 @@ GENERAL RULES:
 - Use the enriched analysis data to provide detailed, informative responses.
 - When available, explain WHY decisions were made (e.g., category selection, conflict resolution).
 - Include relevant insights from the analysis without being overwhelming.
+- Never Give task ID, USER ID, or any database id related to the user
+
 
 ENRICHED DATA PROCESSING INSTRUCTIONS:
-- If operation summaries are available, use them to explain what was accomplished.
+- If operation summaries are available, use them to explain what was accomplished but be very brief.
 - If analysis data is available, incorporate relevant insights naturally into your response.
 - For journal operations: explain categorization reasoning, title selection, and content insights.
 - Make the response feel natural and conversational, not like a technical report.
+
 
 INFORMATION TO DELIVER (times already converted to user's timezone):
 {info_text}
@@ -226,7 +229,7 @@ Please format this information appropriately for the user, following all guideli
     def process_context_clarification(self, clarification_request: str) -> str:
         """Formats a clarification request to the user."""
         try:
-            prompt = f'Translate and format this clarification request in friendly Indonesian with an emoji. Include the test phrase "this is answering agent test":\n\nRequest: "{clarification_request}"'
+            prompt = f'Translate and format this clarification request in friendly Indonesian with an emoji. Include the test phrase \n\nRequest: "{clarification_request}"'
             response = self.ai_model.generate_content(prompt)
             return response.text.strip() if hasattr(response, 'text') else str(response).strip()
         except Exception as e:
