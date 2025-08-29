@@ -50,30 +50,81 @@ except ImportError as e:
     sys.exit(1)
 
 
-class ConversationHistory:
+class DatabaseConversationHistory:
     """
-    Stores structured conversation history locally in memory for a single session.
+    Manages structured conversation history in a Supabase database.
+    It relies on a database trigger to maintain a sliding window of conversations.
     """
-    def __init__(self):
-        self.history: List[Dict[str, Any]] = []
-        self.max_history = 5
-        self.turn_counter = 0
-    
+    def __init__(self, supabase_client: Client, user_id: str, max_history: int = 5):
+        self.db: Client = supabase_client
+        self.user_id: str = user_id
+        self.max_history: int = max_history
+
     def add_interaction(self, user_input: str, clarified_input: str, response: Any):
-        self.turn_counter += 1
-        interaction = {
-            'timestamp': datetime.now().isoformat(),
-            'user_input': user_input,
-            'clarified_input': clarified_input,
-            'response': str(response) if response is not None else '',
-            'conversation_turn': self.turn_counter
-        }
-        self.history.append(interaction)
-        if len(self.history) > self.max_history:
-            self.history = self.history[-self.max_history:]
-    
+        """
+        Adds a new interaction to the database and relies on a trigger
+        to clean up old entries.
+        """
+        try:
+            # 1. Get the latest conversation turn number for the user
+            result = self.db.table('conversation_history') \
+                .select('conversation_turn') \
+                .eq('user_id', self.user_id) \
+                .order('conversation_turn', desc=True) \
+                .limit(1) \
+                .execute()
+
+            last_turn = 0
+            if result.data:
+                last_turn = result.data[0].get('conversation_turn', 0)
+            
+            new_turn = last_turn + 1
+
+            # 2. Insert the new record
+            interaction_record = {
+                'user_id': self.user_id,
+                'user_input': user_input,
+                'system_action': clarified_input,  # Mapping clarified_input to system_action
+                'conversation_turn': new_turn,
+                'entity_data': {'response': str(response) if response is not None else ''}
+            }
+            
+            self.db.table('conversation_history').insert(interaction_record).execute()
+            logger.info(f"Logged interaction turn {new_turn} for user '{self.user_id}' to database.")
+
+        except Exception as e:
+            logger.error(f"❌ Failed to add conversation history to DB for user '{self.user_id}': {e}", exc_info=True)
+
     def get_recent_context(self) -> List[Dict[str, Any]]:
-        return self.history.copy()
+        """
+        Retrieves the most recent conversation turns from the database to build context.
+        """
+        try:
+            result = self.db.table('conversation_history') \
+                .select('user_input, system_action, entity_data, created_at') \
+                .eq('user_id', self.user_id) \
+                .order('conversation_turn', desc=True) \
+                .limit(self.max_history) \
+                .execute()
+
+            if not result.data:
+                return []
+
+            # Reformat to match the structure expected by the context agent
+            # and reverse the order to be chronological (oldest to newest)
+            history = [
+                {
+                    'user_input': row['user_input'],
+                    'clarified_input': row['system_action'],
+                    'response': row.get('entity_data', {}).get('response', ''),
+                    'timestamp': row['created_at']
+                } for row in reversed(result.data)
+            ]
+            return history
+
+        except Exception as e:
+            logger.error(f"❌ Failed to get conversation history from DB for user '{self.user_id}': {e}", exc_info=True)
+            return []
 
 
 class TodowaApp:
@@ -91,7 +142,7 @@ class TodowaApp:
         self.fallback_agent: GeneralFallbackAgent = None
         self.answering_agent: AnsweringAgent = None
         self._is_initialized = False
-        self.user_histories: Dict[str, ConversationHistory] = {}
+        # The in-memory user_histories dictionary has been removed.
 
     def initialize_system(self) -> bool:
         if self._is_initialized:
@@ -133,7 +184,8 @@ class TodowaApp:
 
         final_response_text = ""
         resolved_command = ""
-        history_manager = self.user_histories.setdefault(user_id, ConversationHistory())
+        # Instantiate the database history manager for each request.
+        history_manager = DatabaseConversationHistory(self.supabase, user_id)
         
         try:
             db_manager = DatabaseManager(self.supabase, user_id)
@@ -227,7 +279,6 @@ class TodowaApp:
                 clarified_input=resolved_command,
                 response=final_response_text
             )
-            logger.info(f"Interaction logged for user '{user_id}'. History size: {len(history_manager.history)} turns.")
 
     async def _build_user_context(self, user_id: str) -> Dict[str, Any]:
         context = {
@@ -261,8 +312,7 @@ class TodowaApp:
 app = Flask(__name__)
 chat_app = TodowaApp()
 
-# --- CHANGE: Eagerly initialize the system when the app is created. ---
-# This replaces the need for the deprecated @app.before_first_request decorator.
+# --- Eagerly initialize the system when the app is created. ---
 logger.info("Starting Todowa application setup...")
 if not chat_app.initialize_system():
     logger.critical("FATAL: Todowa Application failed to initialize. The app may not work correctly.")
@@ -310,5 +360,4 @@ def health_check():
 
 if __name__ == "__main__":
     logger.info("Starting Flask development server on http://localhost:5001")
-    # The app is already initialized, so we just need to run it.
     app.run(host='0.0.0.0', port=5001, debug=True)
