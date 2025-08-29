@@ -36,7 +36,6 @@ try:
 
     # --- Agent Imports ---
     from src.multi_agent_system.agents.context_resolution_agent import ContextResolutionAgent
-    # --- CHANGE 1: Import the new AuditAgent ---
     from src.multi_agent_system.agents.audit_agent import AuditAgent
     from src.multi_agent_system.agents.journal_agent import JournalAgent
     from src.multi_agent_system.agents.brain_agent import BrainAgent
@@ -83,7 +82,6 @@ class TodowaApp:
         self.api_key_manager: ApiKeyManager = None
         # --- Agent Placeholders ---
         self.context_agent: ContextResolutionAgent = None
-        # --- CHANGE 2: Add a placeholder for the AuditAgent instance ---
         self.audit_agent: AuditAgent = None
         self.journal_agent: JournalAgent = None
         self.brain_agent: BrainAgent = None
@@ -109,7 +107,6 @@ class TodowaApp:
             gemini_key_count = self.api_key_manager.get_key_count()
             logger.info(f"🔑 API Key Manager initialized with {gemini_key_count} Gemini key(s).")
             
-            # --- CHANGE 3: Initialize the AuditAgent alongside the others ---
             self.context_agent = ContextResolutionAgent(ai_model=self.api_key_manager.create_ai_model("context_agent"))
             self.audit_agent = AuditAgent(ai_model=self.api_key_manager.create_ai_model("audit_agent"))
             self.journal_agent = JournalAgent(ai_model=self.api_key_manager.create_ai_model("journal_agent"), supabase=self.supabase)
@@ -142,13 +139,13 @@ class TodowaApp:
             db_manager = DatabaseManager(self.supabase, user_id)
             logger.info(f"💬 Processing for user '{user_id}': '{message}'")
             
-            # --- CHANGE 4: REVISED message processing pipeline to integrate AuditAgent correctly ---
             # STAGE 1: CONTEXT RESOLUTION
             conversation_history = history_manager.get_recent_context()
             context_result = self.context_agent.resolve_context(message, conversation_history)
             
             if context_result.get("status") != "SUCCESS":
                  final_response_text = f"I need more information: {context_result.get('reason', 'Could you please rephrase?')}"
+                 resolved_command = message # Log the original message if clarification fails
                  return final_response_text
 
             resolved_command = context_result.get("resolved_command", message)
@@ -159,7 +156,6 @@ class TodowaApp:
             sub_tasks = execution_plan.get('sub_tasks', [])
             
             logger.info(f"✅ Plan Created: Found {len(sub_tasks)} sub-task(s) for delegation.")
-            # --- END OF NEW PIPELINE STAGES ---
 
             if not sub_tasks:
                 logger.warning(f"Audit Agent failed to create a plan for: '{resolved_command}'. Falling back.")
@@ -190,9 +186,8 @@ class TodowaApp:
 
             user_context = await self._build_user_context(user_id)
 
-            # --- CHANGE 5: THIS LOOP IS YOUR ORIGINAL LOGIC. IT NOW WORKS PERFECTLY WITH THE NEW PIPELINE. ---
             for task in sub_tasks:
-                clarified_command = task.get('clarified_command') # This now comes from the AuditAgent
+                clarified_command = task.get('clarified_command')
                 route_to = task.get('route_to')
                 
                 if not clarified_command or not route_to:
@@ -202,7 +197,6 @@ class TodowaApp:
                 
                 if route_to in agent_map:
                     specialist_agent = agent_map[route_to]
-                    # Your original logic of calling the specialist agent
                     agent_response = specialist_agent.process_command(user_command=clarified_command, user_context=user_context)
                     
                     if agent_response:
@@ -266,11 +260,12 @@ class TodowaApp:
             logger.error(f"❌ Action execution failed for user '{user_id}': {e}", exc_info=True)
             return {'success': False, 'error': str(e), 'results': []}
 
-# --- Flask Web Server Setup (No changes needed below this line) ---
+# --- Flask Web Server Setup ---
 app = Flask(__name__)
 chat_app = TodowaApp()
 
-@app._got_first_request
+# --- CHANGE: Corrected the Flask decorator from @app._got_first_request to @app.before_first_request ---
+@app.before_first_request
 def startup():
     logger.info("Starting Todowa application setup for Flask...")
     if not chat_app.initialize_system():
