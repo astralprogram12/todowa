@@ -106,7 +106,10 @@ class ContextResolutionAgent:
         5.  **Be Explicit with Plurals**: When a user's command refers to multiple items (e.g., "all of them," "every task with 'X'"), you **must** resolve and list every specific item that the command applies to within the `clarified_command`. This ensures absolute clarity for the next agent.
         6.  **Annotate Implied Context**: For messages that imply a deeper meaning, you must add a brief, clarifying note within the `clarified_command`. For instance, a command to "update" something implies a change from a previous state.
         7.  **No Referential Pronouns:** Your `clarified_command` must never contain pronouns like 'he', 'she', 'it', 'they', 'prior', 'previous', 'last', or 'them'. Always replace them with the specific noun they refer to.
-
+        8.  **CRITICAL: One Sub-Task Per Agent Type, Max ONE Entry!**
+            You MUST generate at most ONE `sub_task` entry for each unique agent type (e.g., only one `TaskAgent` entry, only one `JournalAgent` entry, etc.) in the entire `sub_tasks` list.
+            If the user command contains multiple related actions or pieces of information that all belong to the *same* agent, you MUST combine them into a *single, comprehensive* `clarified_command` for that agent's ONE `sub_task` entry. Do NOT create multiple `sub_task` entries with the same `route_to` value.
+        ---
         ### **AGENT ROSTER & RESPONSIBILITIES**
 
         You must route to as few agent as possile and each agent is maximum ONCE:
@@ -214,6 +217,18 @@ class ContextResolutionAgent:
             ]}}
             ```
 
+        **Example 7: Very Complex Command with Mixed Grouping (No History)**
+        *   **Conversation History**: `No conversation history available.`
+        *   **Current User Command**: "Rina's birthday is August 30th, schedule a party for her that day at 7pm, remind me to buy a cake two days before, and also create a task to call the caterer."
+        *   **JSON**:
+            ```json
+            {{"sub_tasks": [
+                {{"route_to": "JournalAgent", "clarified_command": "remember that Rina's birthday is August 30th"}},
+                {{"route_to": "ScheduleAgent", "clarified_command": "schedule an event 'Rina's party' for August 30th at 7pm, and also remind me on August 28th to buy a cake for it"}},
+                {{"route_to": "TaskAgent", "clarified_command": "create a task to call the caterer"}}
+            ]}}
+            ```
+
         **Example 8: Implied Intent from Context (Completing a Task)**
         *   **Conversation History**: `USER: what do I need to do for the project launch?\nASSISTANT: You have one remaining task: 'Confirm final design with client'.`
         *   **Current User Command**: "I just got off the phone with them, it's approved"
@@ -254,6 +269,16 @@ class ContextResolutionAgent:
             ]}}
 
             
+        **Example 12: CRITICAL: Combining Multiple Journal Notes into ONE `JournalAgent` Sub-Task**
+         *   **Conversation History**: `No conversation history available.`
+         *   **Current User Command**: "Deskripsi: Penjelasan kelebihan dan kekurangan. Katalog: Diisi BMC dan deskripsi produk. Etalase: Diisi BMC dan deskripsi produk. Target: Sesuai dengan target kelompok. Rencana usaha: BMC untuk permodalan (pinjaman usaha ke BMS)"
+         *   **JSON**:
+             ```json
+             {{"sub_tasks": [
+                {{"route_to": "JournalAgent", "clarified_command": "add the following comprehensive business notes to the journal: Description: Explanation of pros and cons. Catalog details: Includes BMC and product description. Showcase section: Also includes BMC and product description. Target audience: Aligned with the specific target group. Business plan detail: BMC for business capital (loan to BMS)."}}
+             ]}}
+            ```
+
         ---
         Now, analyze the command and produce the execution plan based on the user command and the full conversation history. Respond with ONLY the valid JSON object.
         """
