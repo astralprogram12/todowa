@@ -145,7 +145,7 @@ class TodowaApp:
             
             if context_result.get("status") != "SUCCESS":
                  final_response_text = f"I need more information: {context_result.get('reason', 'Could you please rephrase?')}"
-                 resolved_command = message # Log the original message if clarification fails
+                 resolved_command = message
                  return final_response_text
 
             resolved_command = context_result.get("resolved_command", message)
@@ -161,9 +161,6 @@ class TodowaApp:
                 logger.warning(f"Audit Agent failed to create a plan for: '{resolved_command}'. Falling back.")
                 user_context = await self._build_user_context(user_id)
                 agent_response = self.fallback_agent.process_command(user_command=resolved_command, user_context=user_context)
-                
-                if 'user_context' not in agent_response:
-                    agent_response['user_context'] = user_context
                 
                 final_response_text = self.answering_agent.process_response(agent_response)
                 return final_response_text
@@ -264,12 +261,11 @@ class TodowaApp:
 app = Flask(__name__)
 chat_app = TodowaApp()
 
-# --- CHANGE: Corrected the Flask decorator from @app._got_first_request to @app.before_first_request ---
-@app.before_first_request
-def startup():
-    logger.info("Starting Todowa application setup for Flask...")
-    if not chat_app.initialize_system():
-        logger.critical("FATAL: Todowa Application failed to initialize. The app will not work.")
+# --- CHANGE: Eagerly initialize the system when the app is created. ---
+# This replaces the need for the deprecated @app.before_first_request decorator.
+logger.info("Starting Todowa application setup...")
+if not chat_app.initialize_system():
+    logger.critical("FATAL: Todowa Application failed to initialize. The app may not work correctly.")
 
 @app.route('/webhook', methods=['POST', 'GET'])
 def webhook():
@@ -314,5 +310,5 @@ def health_check():
 
 if __name__ == "__main__":
     logger.info("Starting Flask development server on http://localhost:5001")
-    startup()
+    # The app is already initialized, so we just need to run it.
     app.run(host='0.0.0.0', port=5001, debug=True)
