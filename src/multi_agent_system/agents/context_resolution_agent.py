@@ -106,7 +106,9 @@ class ContextResolutionAgent:
         5.  **Be Explicit with Plurals**: When a user's command refers to multiple items (e.g., "all of them," "every task with 'X'"), you **must** resolve and list every specific item that the command applies to within the `clarified_command`. This ensures absolute clarity for the next agent.
         6.  **Annotate Implied Context**: For messages that imply a deeper meaning, you must add a brief, clarifying note within the `clarified_command`. For instance, a command to "update" something implies a change from a previous state.
         7.  **No Referential Pronouns:** Your `clarified_command` must never contain pronouns like 'he', 'she', 'it', 'they', 'prior', 'previous', 'last', or 'them'. Always replace them with the specific noun they refer to.
-       8.  **Strict Single-Agent Entry per Type:** For any given agent (e.g., `TaskAgent`, `JournalAgent`, `ScheduleAgent`), you MUST create only **one** `sub_task` entry in the `sub_tasks` list. If the user command contains multiple requests for the *same type* of agent, you MUST combine all those requests into a single, comprehensive `clarified_command` for that agent's single entry. For example, if the user asks to "add task A" and "delete task B", both should be combined into one `TaskAgent` entry.
+        8.  **CRITICAL: One Sub-Task Per Agent Type, Max ONE Entry!**
+            You MUST generate at most ONE `sub_task` entry for each unique agent type (e.g., only one `TaskAgent` entry, only one `JournalAgent` entry, etc.) in the entire `sub_tasks` list.
+            If the user command contains multiple related actions or pieces of information that all belong to the *same* agent, you MUST combine them into a *single, comprehensive* `clarified_command` for that agent's ONE `sub_task` entry. Do NOT create multiple `sub_task` entries with the same `route_to` value.
         ---
         ### **AGENT ROSTER & RESPONSIBILITIES**
 
@@ -267,14 +269,14 @@ class ContextResolutionAgent:
             ]}}
 
             
-        **Example 12: Combining Multiple Journal Entries into One Comprehensive Command**
-        *   **Conversation History**: `No conversation history available.`
-        *   **Current User Command**: "Deskripsi: Penjelasan kelebihan dan kekurangan. Katalog: Diisi BMC dan deskripsi produk. Etalase: Diisi BMC dan deskripsi produk. Target: Sesuai dengan target kelompok."
-        *   **JSON**:
-            ```json
-            {{"sub_tasks": [
-                {{"route_to": "JournalAgent", "clarified_command": "add the following notes to the journal: 1. Description: Explanation of pros and cons. 2. Catalog: Contains BMC and product description. 3. Showcase: Contains BMC and product description. 4. Target: Aligned with the target group."}}
-            ]}}
+        **Example 12: CRITICAL: Combining Multiple Journal Notes into ONE `JournalAgent` Sub-Task**
+         *   **Conversation History**: `No conversation history available.`
+         *   **Current User Command**: "Deskripsi: Penjelasan kelebihan dan kekurangan. Katalog: Diisi BMC dan deskripsi produk. Etalase: Diisi BMC dan deskripsi produk. Target: Sesuai dengan target kelompok. Rencana usaha: BMC untuk permodalan (pinjaman usaha ke BMS)"
+         *   **JSON**:
+             ```json
+             {{"sub_tasks": [
+                {{"route_to": "JournalAgent", "clarified_command": "add the following comprehensive business notes to the journal: Description: Explanation of pros and cons. Catalog details: Includes BMC and product description. Showcase section: Also includes BMC and product description. Target audience: Aligned with the specific target group. Business plan detail: BMC for business capital (loan to BMS)."}}
+             ]}}
             ```
 
         ---
