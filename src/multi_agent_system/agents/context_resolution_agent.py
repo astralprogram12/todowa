@@ -1,284 +1,218 @@
-# File: src/multi_agent_system/agents/context_resolution_agent.py
-
 import json
-import logging
-from datetime import datetime, timezone
-from typing import Dict, Any, List
+from typing import List, Dict, Any
 
-logger = logging.getLogger(__name__)
+# ======================================================================================
+# ==  PROMPT BUILDER: The tool that constructs the agent's instructions for the AI  ==
+# ======================================================================================
+
+class ContextResolverPromptBuilder:
+    """
+    Constructs the prompt for the ContextResolutionAgent.
+
+    This class has NO dependency on an AI model. Its only job is to build a string.
+    By keeping this logic separate, the prompt is easy to manage, test, and update
+    without changing the agent's core operational code.
+    """
+
+    def _get_header(self) -> str:
+        """Returns the introductory part of the prompt, defining the agent's persona."""
+        return """
+You are a Context Clarification Agent and Polyglot Language Master for a personal productivity app. Your goal is to produce a single, unambiguous, and perfectly structured command string or identify when a command is invalid.
+
+🌍 **LANGUAGE EXPERTISE**: You are a master of English, Indonesian/Bahasa, and Spanish, including all forms of slang, colloquialisms, and mixed-language use.
+
+🔤 **TYPO & ERROR HANDLING**: You intelligently interpret misspellings, grammar errors, and mobile typing mistakes.
+
+💡 **SMART INTERPRETATION**: You analyze the semantic meaning of the conversation to understand the user's true intent, going beyond literal interpretation.
+"""
+
+    def _get_core_mission_and_rules(self) -> str:
+        """Returns the mandatory principles and critical validation logic."""
+        return """
+### **CORE MISSION & RULES (MANDATORY)**
+
+**Guiding Philosophy:** Your role is to be a meticulous and helpful pre-processor. You clarify, you synthesize, you structure. You do **not** execute, invent information, or make assumptions beyond what the context provides. Your output must be a perfect, machine-readable representation of the user's intent.
+
+1.  **COMMAND SYNTHESIS & GROUPING:** If a user provides multiple related items in one message (e.g., a list of tasks), you MUST combine them into a single, coherent `resolved_command`.
+
+2.  **RULE COMMAND IDENTIFICATION:** You must identify and apply meta-commands or "rules" (like setting a category or due date) to all relevant items in the user's input.
+
+3.  **CAPTURE URGENCY & PRIORITY:** If the user mentions keywords like "urgent", "important", "ASAP", "high priority", etc., you MUST preserve this information as a clear annotation within the `resolved_command`.
+
+4.  **CRITICAL: REMINDER VALIDATION:** All reminder-related actions MUST have a specific OBJECT or PURPOSE. If not, you MUST return a `NEEDS_CLARIFICATION` status.
+
+5.  **ELIMINATE ALL PRONOUNS:** You MUST replace all contextual pronouns (`it`, `that`, `they`, `the last one`) with the specific, literal nouns they refer to.
+
+6.  **CREATE A SELF-CONTAINED COMMAND:** The final `resolved_command` must be fully understandable on its own, without needing any conversation history.
+
+7.  **STRIP CONVERSATIONAL FILLER:** Remove fluff (e.g., "please", "can you") to produce a direct instruction.
+"""
+
+    def _get_response_format(self) -> str:
+        """Returns the mandatory JSON response format."""
+        return """
+### **RESPONSE FORMAT (JSON ONLY)**
+You MUST respond with ONLY a single JSON object.
+
+**If the command is clear and valid:**
+```json
+{
+  "status": "SUCCESS",
+  "resolved_command": "Your final, clarified, and synthesized command goes here."
+}
+```
+
+**If the command is invalid or ambiguous:**
+```json
+{
+  "status": "NEEDS_CLARIFICATION",
+  "reason": "Explain why the command is invalid (e.g., The reminder has no specific object)."
+}
+```
+"""
+
+    def _get_examples(self) -> str:
+        """Provides 10 expert examples with rationales to train the AI's thought process."""
+        return """
+### **EXPERT EXAMPLES (10 Examples with Rationale)**
+
+**1. Pronoun Resolution**
+History: USER: create a task to call the plumber
+Command: "add to it that it's for the kitchen sink"
+JSON: {"status": "SUCCESS", "resolved_command": "update the task 'Call plumber' with the detail: 'it is for the kitchen sink'"}
+// Rationale: Correctly replaced "it" with "the task 'Call plumber'".
+
+**2. Invalid Reminder**
+Command: "remind me tomorrow at 9am"
+JSON: {"status": "NEEDS_CLARIFICATION", "reason": "The reminder has no specific object or purpose."}
+// Rationale: The command fails the Reminder Validation rule.
+
+**3. Implicit Task Grouping**
+Command: "I need to buy groceries, pick up the dry cleaning, and also get some gas"
+JSON: {"status": "SUCCESS", "resolved_command": "add tasks: buy groceries, pick up the dry cleaning, and get gas"}
+// Rationale: Synthesized three separate actions into one grouped command.
+
+**4. Capturing Urgency/Priority**
+Command: "add a task to finalize the quarterly report, it's super important"
+JSON: {"status": "SUCCESS", "resolved_command": "add task: finalize the quarterly report (priority: high)"}
+// Rationale: Identified "super important" and converted it into structured metadata.
+
+**5. Explicit Rule Command**
+Command: "add a task to draft the Q3 report and call the supplier. add all of this task to the 'Project Phoenix' group"
+JSON: {"status": "SUCCESS", "resolved_command": "add the following tasks to the 'Project Phoenix' group: draft the Q3 report and call the supplier"}
+// Rationale: Correctly applied the "rule command" (grouping) to both tasks mentioned.
+
+**6. Typo & Mixed Language Correction**
+Command: "tolong ingatkan saya besok buat coll nisa, its very importent"
+JSON: {"status": "SUCCESS", "resolved_command": "remind me tomorrow to call Nisa, it's very important"}
+// Rationale: Corrected multiple typos and handled mixed Indonesian/English.
+
+**7. Deep Context Resolution**
+History: USER: find my notes about the Q3 report\\nASSISTANT: I found 'Q3 Meeting Summary'.
+Command: "ok now delete that note"
+JSON: {"status": "SUCCESS", "resolved_command": "delete the journal note titled 'Q3 Meeting Summary'"}
+// Rationale: Resolved "that note" by looking back two turns in the history.
+
+**8. Smart Interpretation ("Nevermind" Pattern)**
+History: USER: remind me in 10 minutes to check the oven
+Command: "actually, nevermind"
+JSON: {"status": "SUCCESS", "resolved_command": "cancel the previous request to 'remind me in 10 minutes to check the oven'"}
+// Rationale: Recognized the 'cancel' intent and referenced the previous command.
+
+**9. Complex Synthesis (Rule + Pronoun + Grouping)**
+History: USER: I created two tasks: 'Review slides' and 'Practice speech'.
+Command: "for both of them, set the due date to tomorrow and add them to the 'Presentation Prep' category"
+JSON: {"status": "SUCCESS", "resolved_command": "for the tasks 'Review slides' and 'Practice speech', set their due date to tomorrow and add them to the 'Presentation Prep' category"}
+// Rationale: Applied a rule to multiple items that were referenced by a pronoun ("both of them").
+
+**10. Implicit Journal Grouping**
+Command: "About the meeting: the client was happy. Key takeaway is to focus on marketing. Follow-up is next Tuesday."
+JSON: {"status": "SUCCESS", "resolved_command": "add journal note titled 'Meeting Summary': The client was happy. Key takeaway is to focus on marketing. The follow-up is scheduled for next Tuesday."}
+// Rationale: Synthesized a multi-sentence, informal note into a structured journal entry with an inferred title.
+"""
+
+    def build(self, user_command: str, conversation_history: str) -> str:
+        """Assembles the complete Context Resolution prompt."""
+        prompt_parts = [
+            self._get_header(),
+            self._get_core_mission_and_rules(),
+            self._get_response_format(),
+            "---",
+            "### CONVERSATION HISTORY (Your Context Source)",
+            conversation_history if conversation_history else "No conversation history available.",
+            "---",
+            "### CURRENT USER COMMAND (To Be Resolved)",
+            f'"{user_command}"',
+            "---",
+            self._get_examples(),
+            "---",
+            "Now, analyze the command and its history. Produce the single, resolved command or a clarification request in the specified JSON format. Respond with NOTHING but the JSON object."
+        ]
+        
+        return "\n".join(prompt_parts)
+
+
+# ======================================================================================
+# == CONTEXT RESOLUTION AGENT: The class that uses the builder and the AI model ==
+# ======================================================================================
 
 class ContextResolutionAgent:
     """
-    Acts as the Master Planner for the multi-agent system.
-    It deconstructs user commands into a multi-step execution plan, using full
-    conversation history to resolve all ambiguities. It maintains the original
-    public method signatures for compatibility.
+    Clarifies and synthesizes user commands using an AI model.
+    This agent's purpose is to act as the first step in the pipeline, turning
+    messy, conversational user input into a single, clean, and actionable command.
     """
-    def __init__(self, ai_model=None):
+    
+    def __init__(self, ai_model: Any):
+        """
+        Initializes the agent with the necessary tools.
+        
+        Args:
+            ai_model: A pre-configured AI model instance (e.g., from a factory or manager)
+                      ready to be used for generating content.
+        """
+        if not ai_model:
+            raise ValueError("An AI model instance must be provided to the ContextResolutionAgent.")
+        
         self.ai_model = ai_model
-        # This agent is now stateless. The main app is responsible for managing and passing the history.
+        self.prompt_builder = ContextResolverPromptBuilder()
 
     def resolve_context(self, user_command: str, conversation_history: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
-        Takes a raw user command and structured conversation history, and returns a 
-        multi-step execution plan. This is the entry point to the Master Planner.
-        """
-        if not self.ai_model:
-            logger.error("ContextResolutionAgent AI model is not initialized.")
-            return {"sub_tasks": []}
+        Processes the user command to resolve context, pronouns, and ambiguities.
 
-        context_for_prompt = self._build_context_string_from_structured(conversation_history)
-        prompt = self._build_master_planner_prompt(user_command, context_for_prompt)
+        Args:
+            user_command: The raw string command from the user.
+            conversation_history: A list of conversation turn dictionaries from the history manager.
+
+        Returns:
+            A dictionary with a 'status' and either a 'resolved_command' or a 'reason'.
+            Example success: {"status": "SUCCESS", "resolved_command": "add task to call mom"}
+            Example failure: {"status": "NEEDS_CLARIFICATION", "reason": "The reminder has no object."}
+        """
+        # Convert the structured history list into a flat string for the prompt
+        history_str = "\n".join([
+            f"USER: {turn.get('user_input', '')}\nASSISTANT: {turn.get('response', '')}"
+            for turn in conversation_history
+        ])
+
+        # Use the builder to construct the full, detailed prompt
+        prompt_string = self.prompt_builder.build(user_command, history_str)
         
+        # Call the AI model to get the clarified command
         try:
-            response = self.ai_model.generate_content(prompt)
-            cleaned_response = response.text.strip().replace('```json', '').replace('```', '')
-            parsed_json = json.loads(cleaned_response)
+            response = self.ai_model.generate_content(prompt_string)
             
-            if "sub_tasks" not in parsed_json or not isinstance(parsed_json.get("sub_tasks"), list):
-                logger.warning(f"Planner returned malformed JSON. Defaulting to fallback. Response: {cleaned_response}")
-                return {"sub_tasks": [{"route_to": "GeneralFallback", "clarified_command": user_command}]}
-
-            return parsed_json
-        except (json.JSONDecodeError, TypeError, Exception) as e:
-            logger.error(f"Failed to parse Master Planner response: {e}\nResponse was: {getattr(response, 'text', 'N/A')}")
-            return {"sub_tasks": [{"route_to": "GeneralFallback", "clarified_command": user_command}]}
-
-    def needs_clarification(self, routing_result: Dict[str, Any]) -> bool:
-        """
-        A simple check: if the plan is empty, it might indicate a need for clarification.
-        """
-        return not routing_result.get("sub_tasks")
-
-    def add_interaction(self, *args, **kwargs):
-        """
-        Placeholder for compatibility. The main application is responsible
-        for managing the conversation history state.
-        """
-        pass
-
-    def _build_context_string_from_structured(self, history: List[Dict[str, Any]]) -> str:
-        """
-        Formats the structured conversation history into a simple string for the AI prompt.
-        """
-        if not history:
-            return "No conversation history available."
-        
-        # We use the last 2 turns (4 entries max) to keep the prompt focused
-        recent_turns = history[-2:]
-        
-        formatted_history = []
-        for turn in recent_turns:
-            # Use the raw user input and the final AI response for the context
-            formatted_history.append(f"USER: {turn.get('user_input', '')}")
-            formatted_history.append(f"ASSISTANT: {turn.get('response', '')}")
-        
-        return "\n".join(formatted_history)
-
-    def _build_master_planner_prompt(self, user_command: str, conversation_history: str) -> str:
-        """
-        Builds the definitive Master Planner prompt, now with a fully structured
-        and populated conversation history section and examples.
-        """
-        current_time_utc = datetime.now(timezone.utc).isoformat()
-        
-        return f"""
-        You are a world-class AI Master Planner. Your sole function is to deconstruct a user's command into a precise, multi-step execution plan. You MUST use the provided conversation context to resolve all ambiguities.
-
-        You are aware that the current UTC time is {current_time_utc}.
-
-        ---
-        ### **RECENT CONVERSATION HISTORY**
-        {conversation_history}
-        ---
-        ### **CURRENT USER COMMAND TO ANALYZE**
-        "{user_command}"
-        ---
-
-
-        ---
-        ### **CORE PRINCIPLES (MANDATORY)**
-
-        1.  **Route, Never Execute:** Your only job is to prepare the command and select the destination. You do not answer questions or perform actions yourself.
-        2.  **Clarify, Don't Invent:** Your primary role is to create a clear, self-contained string for the `clarified_command`. You resolve pronouns ("it", "that"), identify the core user intent, and strip conversational filler ("please", "can you"). You do not invent programmatic actions (like "create_task").
-        3.  **Total Ambiguity Resolution:** The `clarified_command` you generate MUST be understandable by a downstream agent *without* any conversation history. Your output must be complete on its own.
-        4.  **Preserve User Language:** Do not translate or rephrase the core components of the user's request, especially names, technical terms, or specific time expressions (e.g., "every Friday at noon").
-        5.  **Be Explicit with Plurals**: When a user's command refers to multiple items (e.g., "all of them," "every task with 'X'"), you **must** resolve and list every specific item that the command applies to within the `clarified_command`. This ensures absolute clarity for the next agent.
-        6.  **Annotate Implied Context**: For messages that imply a deeper meaning, you must add a brief, clarifying note within the `clarified_command`. For instance, a command to "update" something implies a change from a previous state.
-        7.  **No Referential Pronouns:** Your `clarified_command` must never contain pronouns like 'he', 'she', 'it', 'they', 'prior', 'previous', 'last', or 'them'. Always replace them with the specific noun they refer to.
-        8.  **CRITICAL: One Sub-Task Per Agent Type, Max ONE Entry!**
-            You MUST generate at most ONE `sub_task` entry for each unique agent type (e.g., only one `TaskAgent` entry, only one `JournalAgent` entry, etc.) in the entire `sub_tasks` list.
-            If the user command contains multiple related actions or pieces of information that all belong to the *same* agent, you MUST combine them into a *single, comprehensive* `clarified_command` for that agent's ONE `sub_task` entry. Do NOT create multiple `sub_task` entries with the same `route_to` value.
-        ---
-        ### **AGENT ROSTER & RESPONSIBILITIES**
-
-        You must route to as few agent as possile and each agent is maximum ONCE:
-
-        1.  **`TaskAgent`**:
-            *   **Handles**: Managing a to-do list. This includes creating, updating, deleting, and completing immediate, non-scheduled tasks.
-            *   **Typical Inputs**: "add a task to buy milk", "complete the last one", "delete the laundry task".
-
-        2.  **`ScheduleAgent`**:
-            *   **Handles**: Any and all actions involving a specific future time, date, or recurrence. This is for reminders, appointments, and scheduled events.
-            *   **Typical Inputs**: "remind me to call mom tomorrow", "schedule a meeting for 3pm", "submit timesheet every Friday".
-
-        3.  **`JournalAgent`**:
-            *   **Handles**: Storing and managing the user's long-term, non-actionable information. This is the system's memory for facts, notes, and user-provided data.
-            *   **Typical Inputs**: "remember that the wifi password is...", "log that I finished the project", "what is Rina's address?".
-
-        4.  **`FindingAgent`**:
-            *   **Handles**: Pure information retrieval. Its job is to **FIND FACTS**. It first searches the user's internal database (Tasks, Journal) and, if nothing is found, searches the live internet. It is a librarian, not a consultant.
-            *   **Routing Rule**: Use this agent for direct questions starting with "what is," "who is," "find," "search for," or "tell me about."
-            *   **Typical Inputs**: "find my notes on Project Alpha", "who is the CEO of OpenAI?", "what is the recipe for carbonara?".
-
-        5.  **`BrainAgent`**:
-            *   **Handles**: Managing user preferences about how the AI should behave, communicate, or operate.
-            *   **Typical Inputs**: "always use a formal tone", "respond in Spanish from now on", "never suggest tasks from the 'work' category."
-
-        6.  **`GeneralFallback`**:
-            *   **Handles**: All other requests that are not specific commands for the agents above. This agent is a **consultant and creative partner**. It handles conversational small talk, provides advice, synthesizes ideas, and performs creative tasks.
-            *   **Routing Rule**: If the user is asking for **ADVICE** ("what should I do?"), an **OPINION** ("which is better?"), or a **CREATIVE** task ("write a poem"), route here.
-            *   **Typical Inputs**: "hello", "thanks!", "what should I focus on today?", "write a short story for me", "give me some ideas for a vacation."
-
+            # Robustly parse the AI's response, cleaning up potential markdown
+            # This handles cases where the AI wraps its response in ```json ... ```
+            cleaned_response_text = response.text.strip().replace("```json", "").replace("```", "").strip()
             
-        ---
-        ### **RESPONSE FORMAT (JSON ONLY)**
-        ```json
-        {{
-        "sub_tasks": [
-            {{
-            "route_to": "SelectedAgentName",
-            "clarified_command": "The fully resolved and self-contained command for this specific step."
-            }}
-        ]
-        }}
-        ```
-        ---
-        ### **EXPERT EXAMPLES (Study these carefully)**
+            return json.loads(cleaned_response_text)
 
-        **Example 1: Simple Multi-Specialist Command (No History)**
-        *   **Conversation History**: `No conversation history available.`
-        *   **Current User Command**: "add task eating dinner, and add to journal that rumah farah di bandung"
-        *   **JSON**:
-            ```json
-            {{"sub_tasks": [
-                {{"route_to": "TaskAgent", "clarified_command": "add task eating dinner"}},
-                {{"route_to": "JournalAgent", "clarified_command": "add to journal that rumah farah di bandung"}}
-            ]}}
-            ```
-
-        **Example 2: Pronoun Resolution with Full History**
-        *   **Conversation History**: `USER: create a task to call the plumber\nASSISTANT: I've created the task 'Call plumber'.`
-        *   **Current User Command**: "add to it that it's for the kitchen sink"
-        *   **JSON**:
-            ```json
-            {{"sub_tasks": [
-                {{"route_to": "TaskAgent", "clarified_command": "update the task 'Call plumber' to add the note 'it is for the kitchen sink'"}}
-            ]}}
-            ```
-
-        **Example 3: Plural Resolution with Full History**
-        *   **Conversation History**: `USER: what are my tasks?\nASSISTANT: You have 2 tasks: 'Call plumber' and 'Email report'.`
-        *   **Current User Command**: "delete them both"
-        *   **JSON**:
-            ```json
-            {{"sub_tasks": [
-                {{"route_to": "TaskAgent", "clarified_command": "delete the following 2 tasks: 'Call plumber' and 'Email report'"}}
-            ]}}
-            ```
-
-        **Example 4: The CRITICAL Grouping Logic (ScheduleAgent)**
-        *   **Conversation History**: `No conversation history available.`
-        *   **Current User Command**: "schedule a party for Rina on August 30th at 7pm, and also remind me to buy a cake two days before."
-        *   **JSON**:
-            ```json
-            {{"sub_tasks": [
-                {{"route_to": "ScheduleAgent", "clarified_command": "schedule an event 'Rina's party' for August 30th at 7pm, and also remind me on August 28th to buy a cake for it"}}
-            ]}}
-            ```
-
-        **Example 5: The CRITICAL Grouping Logic (TaskAgent)**
-        *   **Conversation History**: `No conversation history available.`
-        *   **Current User Command**: "delete my 'review budget' task and add a new one to 'finalize report'"
-        *   **JSON**:
-            ```json
-            {{"sub_tasks": [
-                {{"route_to": "TaskAgent", "clarified_command": "delete the 'review budget' task and add a new task to 'finalize report'"}}
-            ]}}
-            ```
-
-        **Example 6: Deep Context Resolution (Two-Turn History)**
-        *   **Conversation History**: `USER: find my notes about the Q3 report\nASSISTANT: I found two notes: 'Q3 Report Draft' and 'Q3 Meeting Summary'. Which one are you referring to?\nUSER: the meeting summary\nASSISTANT: Here is the 'Q3 Meeting Summary': [The summary content is displayed to the user...]`
-        *   **Current User Command**: "ok delete that note"
-        *   **JSON**:
-            ```json
-            {{"sub_tasks": [
-                {{"route_to": "JournalAgent", "clarified_command": "delete the journal note titled 'Q3 Meeting Summary'"}}
-            ]}}
-            ```
-
-        **Example 7: Very Complex Command with Mixed Grouping (No History)**
-        *   **Conversation History**: `No conversation history available.`
-        *   **Current User Command**: "Rina's birthday is August 30th, schedule a party for her that day at 7pm, remind me to buy a cake two days before, and also create a task to call the caterer."
-        *   **JSON**:
-            ```json
-            {{"sub_tasks": [
-                {{"route_to": "JournalAgent", "clarified_command": "remember that Rina's birthday is August 30th"}},
-                {{"route_to": "ScheduleAgent", "clarified_command": "schedule an event 'Rina's party' for August 30th at 7pm, and also remind me on August 28th to buy a cake for it"}},
-                {{"route_to": "TaskAgent", "clarified_command": "create a task to call the caterer"}}
-            ]}}
-            ```
-
-        **Example 8: Implied Intent from Context (Completing a Task)**
-        *   **Conversation History**: `USER: what do I need to do for the project launch?\nASSISTANT: You have one remaining task: 'Confirm final design with client'.`
-        *   **Current User Command**: "I just got off the phone with them, it's approved"
-        *   **JSON**:
-            ```json
-            {{"sub_tasks": [
-                {{"route_to": "TaskAgent", "clarified_command": "Complete the task 'Confirm final design with client' and add a note: 'Got approval from them over the phone'"}}
-            ]}}
-            ```
-
-        **Example 9: Distinguishing Agents with Subtle Language ("remind me what...")**
-        *   **Conversation History**: `No conversation history available.`
-        *   **Current User Command**: "remind me what is the wifi password?"
-        *   **JSON**:
-            ```json
-            {{"sub_tasks": [
-                {{"route_to": "FindingAgent", "clarified_command": "find the wifi password"}}
-            ]}}
-            ```
-
-        **Example 10: BrainAgent Preference Setting with Full History**
-        *   **Conversation History**: `USER: tell me about black holes\nASSISTANT: [A very long, multi-paragraph explanation of black holes...]\nUSER: that was too long\nASSISTANT: My apologies. I will try to be more concise in the future.`
-        *   **Current User Command**: "yes, from now on always keep your answers to one paragraph"
-        *   **JSON**:
-            ```json
-            {{"sub_tasks": [
-                {{"route_to": "BrainAgent", "clarified_command": "set user preference: from now on, always keep answers to a single paragraph"}}
-            ]}}
-            ```
-
-        **Example 11: Distinguishing `FindingAgent` (Fact) vs. `GeneralFallback` (Advice)**
-        *   **Conversation History**: `No conversation history available.`
-        *   **Current User Command**: "what should I focus on today?"
-        *   **JSON**:
-            ```json
-            {{"sub_tasks": [
-                {{"route_to": "GeneralFallback", "clarified_command": "what should I focus on today?"}}
-            ]}}
-
-            
-        **Example 12: CRITICAL: Combining Multiple Journal Notes into ONE `JournalAgent` Sub-Task**
-         *   **Conversation History**: `No conversation history available.`
-         *   **Current User Command**: "Deskripsi: Penjelasan kelebihan dan kekurangan. Katalog: Diisi BMC dan deskripsi produk. Etalase: Diisi BMC dan deskripsi produk. Target: Sesuai dengan target kelompok. Rencana usaha: BMC untuk permodalan (pinjaman usaha ke BMS)"
-         *   **JSON**:
-             ```json
-             {{"sub_tasks": [
-                {{"route_to": "JournalAgent", "clarified_command": "add the following comprehensive business notes to the journal: Description: Explanation of pros and cons. Catalog details: Includes BMC and product description. Showcase section: Also includes BMC and product description. Target audience: Aligned with the specific target group. Business plan detail: BMC for business capital (loan to BMS)."}}
-             ]}}
-            ```
-
-        ---
-        Now, analyze the command and produce the execution plan based on the user command and the full conversation history. Respond with ONLY the valid JSON object.
-        """
+        except (json.JSONDecodeError, AttributeError, TypeError, ValueError) as e:
+            # If the AI response is malformed or parsing fails, return a standard error
+            # This ensures the system doesn't crash on an unexpected AI output
+            return {
+                "status": "ERROR",
+                "reason": f"Failed to parse AI response. Error: {e}"
+            }
