@@ -270,7 +270,7 @@ class TodowaApp:
 app = Flask(__name__)
 chat_app = TodowaApp()
 
-@app.before_first_request
+@app._got_first_request
 def startup():
     logger.info("Starting Todowa application setup for Flask...")
     if not chat_app.initialize_system():
