@@ -137,9 +137,10 @@ class AuditAgent:
         
         return "\n".join(formatted_history)
 
+
     def _build_audit_prompt(self, initial_plan: Dict[str, Any], conversation_history: str) -> str:
         """
-        Builds the prompt for the Audit Agent.
+        Builds the prompt for the Audit Agent, with enhanced intelligence for grouping.
         """
         initial_plan_json = json.dumps(initial_plan, indent=2)
 
@@ -149,8 +150,13 @@ class AuditAgent:
 
         If the initial plan contains multiple sub-tasks that route to the *same* agent (e.g., multiple 'JournalAgent' entries),
         you MUST combine their `clarified_command`s into a **single, comprehensive `clarified_command`** for that agent's ONE entry.
-        Make the combined `clarified_command` as clear, concise, and easy-to-read as possible, without losing any original intent.
-        Use bullet points or numbered lists within the `clarified_command` if combining multiple distinct items for readability.
+
+        For `JournalAgent` in particular:
+        *   **Identify Overarching Topics:** Look for common themes or a single conceptual "document" that multiple journal-related commands contribute to.
+        *   **Summarize Thematically:** Consolidate all related information under one logical heading or purpose within the `clarified_command`.
+        *   **DO NOT prefix with "add to journal"**: The `route_to` already indicates it's a journal action. The `clarified_command` should be the *content* or *request for content* itself.
+
+        Make the combined `clarified_command` as clear, concise, and easy-to-read as possible, without losing any original intent. Use structured formats (like bullet points or distinct sections) within the `clarified_command` if combining multiple distinct items for readability.
 
         You are aware of the following recent conversation history to help you in consolidation:
         ---
@@ -166,7 +172,7 @@ class AuditAgent:
         ---
         ### **CORE PRINCIPLES (MANDATORY)**
         1.  **Single Entry Per Agent Type:** Each `route_to` value (e.g., "TaskAgent", "JournalAgent") can appear **only once** in the final `sub_tasks` list.
-        2.  **Combine & Clarify:** Merge all related `clarified_command`s for a single agent into one consolidated command.
+        2.  **Combine & Clarify Thematically:** Merge all related `clarified_command`s for a single agent into one consolidated, *thematically coherent* command.
         3.  **Preserve Original Intent:** Do not lose any details or actions from the original `clarified_command`s.
         4.  **Improve Readability:** Structure the combined `clarified_command` for easy understanding by a human or downstream agent.
         5.  **Output ONLY JSON:** Your response must be a JSON object matching the structure of the `initial_plan`.
@@ -189,25 +195,35 @@ class AuditAgent:
         ---
         ### **EXPERT EXAMPLE (Study this carefully)**
 
-        **Initial Plan (Example of what you might receive):**
+        **Initial Plan (Example of what you might receive - based on your latest complex input):**
         ```json
         {{
             "sub_tasks": [
-                {{"route_to": "JournalAgent", "clarified_command": "add to journal: Description: Explanation of pros and cons"}},
+                {{"route_to": "JournalAgent", "clarified_command": "Description: Explanation of pros and cons"}},
                 {{"route_to": "TaskAgent", "clarified_command": "add task to call John"}},
-                {{"route_to": "JournalAgent", "clarified_command": "add to journal: Catalog: Contains BMC and product description"}},
+                {{"route_to": "JournalAgent", "clarified_command": "Katalog: Diisi BMC dan deskripsi produk"}},
+                {{"route_to": "JournalAgent", "clarified_command": "Etalase: Diisi BMC dan deskripsi produk"}},
+                {{"route_to": "JournalAgent", "clarified_command": "Target (sesuai dengan target kelompok)"}},
+                {{"route_to": "JournalAgent", "clarified_command": "Rencana usaha: BMC Untuk permodalan (pinjaman usaha ke BMS)"}},
+                {{"route_to": "JournalAgent", "clarified_command": "Persyaratan peminjaman: Akad/surat kontrak BMS, Kartu pelajar dan materei"}},
                 {{"route_to": "TaskAgent", "clarified_command": "complete task 'send email'"}}
             ]
         }}
         ```
 
-        **Audited Plan (Example of what you MUST produce):**
+        **Audited Plan (Example of what you MUST produce - intelligent thematic grouping):**
         ```json
         {{
             "sub_tasks": [
                 {{
                     "route_to": "JournalAgent",
-                    "clarified_command": "Add the following journal entries: 1. Description: Explanation of pros and cons. 2. Catalog: Contains BMC and product description."
+                    "clarified_command": "Store comprehensive business plan details:
+                    - **Overview:** Explanation of pros and cons.
+                    - **Catalog Details:** Includes BMC and product description.
+                    - **Showcase/Etalase:** Contains BMC and product description.
+                    - **Target Audience:** Aligned with the specific target group.
+                    - **Business Plan Funding:** BMC for business capital (loan to BMS).
+                    - **Loan Requirements:** Akad/contract with BMS, student card, and stamp duty."
                 }},
                 {{
                     "route_to": "TaskAgent",
