@@ -32,7 +32,7 @@ try:
     from api_key_manager import ApiKeyManager
     from action_executor import ActionExecutor
     from database import DatabaseManager
-    import ai_tools
+    import ai_tools # Assuming this is needed for tool definitions
 
     # --- Agent Imports ---
     from src.multi_agent_system.agents.context_resolution_agent import ContextResolutionAgent
@@ -43,13 +43,13 @@ try:
     from src.multi_agent_system.agents.answering_agent import AnsweringAgent
     from src.multi_agent_system.agents.general_fallback_agent import GeneralFallbackAgent
     from src.multi_agent_system.agents.finding_agent import FindingAgent
+    from src.multi_agent_system.agents.audit_agent import AuditAgent # NEW IMPORT
 
 except ImportError as e:
     logger.critical(f"❌ Import Error: {e}. Ensure all dependencies and local modules are present.")
     sys.exit(1)
 
 
-# --- CHANGE 1: The robust ConversationHistory class is restored and integrated ---
 class ConversationHistory:
     """
     Stores structured conversation history locally in memory for a single session.
@@ -59,7 +59,7 @@ class ConversationHistory:
         self.history: List[Dict[str, Any]] = []
         self.max_history = 5  # Keeps the last 5 full turns
         self.turn_counter = 0
-    
+
     def add_interaction(self, user_input: str, clarified_input: str, response: Any):
         self.turn_counter += 1
         interaction = {
@@ -72,7 +72,7 @@ class ConversationHistory:
         self.history.append(interaction)
         if len(self.history) > self.max_history:
             self.history = self.history[-self.max_history:]
-    
+
     def get_recent_context(self) -> List[Dict[str, Any]]:
         return self.history.copy()
 
@@ -89,13 +89,12 @@ class TodowaApp:
         self.schedule_agent: ScheduleAgent = None
         self.finding_agent: FindingAgent = None
         self.fallback_agent: GeneralFallbackAgent = None
+        self.audit_agent: AuditAgent = None # NEW: Audit Agent
         self.answering_agent: AnsweringAgent = None
         self._is_initialized = False
-        # --- CHANGE 2: The history manager now uses your structured class ---
         self.user_histories: Dict[str, ConversationHistory] = {}
 
     def initialize_system(self) -> bool:
-        # This initialization logic is correct and does not need to be changed.
         if self._is_initialized:
             return True
 
@@ -116,6 +115,7 @@ class TodowaApp:
             self.schedule_agent = ScheduleAgent(ai_model=self.api_key_manager.create_ai_model("schedule_agent"), supabase=self.supabase)
             self.finding_agent = FindingAgent(ai_model=self.api_key_manager.create_ai_model("finding_agent"), supabase=self.supabase)
             self.fallback_agent = GeneralFallbackAgent(ai_model=self.api_key_manager.create_ai_model("fallback_agent"), supabase=self.supabase)
+            self.audit_agent = AuditAgent(ai_model=self.api_key_manager.create_ai_model("audit_agent")) # NEW: Initialize Audit Agent
             self.answering_agent = AnsweringAgent(ai_model=self.api_key_manager.create_chat_model("answering_agent"), supabase=self.supabase)
 
             logger.info("✅ All specialized agents initialized.")
@@ -130,8 +130,8 @@ class TodowaApp:
 
     async def process_message_async(self, message: str, user_id: str) -> str:
         """
-        Asynchronously processes a user message using the Master Planner architecture
-        and a robust, structured conversation history.
+        Asynchronously processes a user message using the Master Planner architecture,
+        including a new Audit Agent for plan consolidation.
         """
         if not self._is_initialized:
             return "❌ The server is not properly initialized. Please contact support."
@@ -141,14 +141,16 @@ class TodowaApp:
         try:
             db_manager = DatabaseManager(self.supabase, user_id)
             logger.info(f"💬 Processing for user '{user_id}': '{message}'")
-            
-            # --- CHANGE 3: Get or create the dedicated history manager for the user ---
+
             history_manager = self.user_histories.setdefault(user_id, ConversationHistory())
             conversation_history = history_manager.get_recent_context()
 
-            # The Master Planner receives the rich, structured history
-            execution_plan = self.context_agent.resolve_context(message, conversation_history)
-            sub_tasks = execution_plan.get('sub_tasks', [])
+            # Step 1: Context Resolution (Master Planner) - gets full conversation history
+            initial_plan = self.context_agent.resolve_context(message, conversation_history)
+
+            # Step 2: Audit the plan - also gets full conversation history for context on consolidation
+            audited_plan = self.audit_agent.audit_plan(initial_plan, conversation_history)
+            sub_tasks = audited_plan.get('sub_tasks', [])
 
             # Create a summary of clarified commands for history logging
             if sub_tasks:
@@ -157,59 +159,57 @@ class TodowaApp:
                 clarified_summary = message # Fallback if no plan was made
 
             if not sub_tasks:
-                logger.warning(f"Master Planner failed to create a plan for: '{message}'. Falling back.")
+                logger.warning(f"Master Planner and Audit Agent failed to create a valid plan for: '{message}'. Falling back.")
                 user_context = await self._build_user_context(user_id)
-                agent_response = self.fallback_agent.process_command(user_command=message, user_context=user_context)
                 
-                # --- FIX IS HERE ---
-                # Ensure the user_context is passed along to the AnsweringAgent.
+                # Fallback path, ensure user_context is passed
+                agent_response = self.fallback_agent.process_command(user_command=message, user_context=user_context)
                 if 'user_context' not in agent_response:
                     agent_response['user_context'] = user_context
-                # --- END OF FIX ---
                 
                 final_response_text = self.answering_agent.process_response(agent_response)
                 return final_response_text
 
             TASK_LIMIT = 3
+            # Apply TASK_LIMIT to the audited plan, after consolidation
             if len(sub_tasks) > TASK_LIMIT:
-                logger.warning(f"User command generated {len(sub_tasks)} sub-tasks. Processing the first {TASK_LIMIT} to prevent abuse.")
+                logger.warning(f"Audited plan generated {len(sub_tasks)} sub-tasks. Processing the first {TASK_LIMIT} to prevent abuse.")
                 sub_tasks = sub_tasks[:TASK_LIMIT]
-            
+
             all_agent_responses, all_actions_to_execute = [], []
-            
+
             agent_map = {
                 "TaskAgent": self.task_agent.process_command,
                 "JournalAgent": self.journal_agent.process_command,
                 "BrainAgent": self.brain_agent.process_command,
                 "ScheduleAgent": self.schedule_agent.process_command,
                 "FindingAgent": self.finding_agent.process_command,
-                "GeneralFallback": self.fallback_agent.process_command,
+                "GeneralFallback": self.fallback_agent.process_command, # Should ideally be caught by context_agent first
             }
 
             user_context = await self._build_user_context(user_id)
-            user_context['conversation_history'] = conversation_history
+            # IMPORTANT: Conversation history is NOT passed to individual specialized agents
+            # This keeps them focused and reduces prompt size.
 
             for task in sub_tasks:
                 clarified_command = task.get('clarified_command')
                 route_to = task.get('route_to')
-                
+
                 if not clarified_command or not route_to:
                     continue
 
                 logger.info(f"  - Sub-task: '{clarified_command}' -> Routing to: {route_to}")
-                
+
                 if route_to in agent_map:
+                    # Pass only the clarified_command and base user_context to specialized agents
                     agent_response = agent_map[route_to](user_command=clarified_command, user_context=user_context)
                     if agent_response:
-                        # --- FIX IS HERE ---
-                        # Ensure every agent response includes the user_context before being stored.
+                        # Ensure user_context is always present in agent responses
                         if 'user_context' not in agent_response:
                             agent_response['user_context'] = user_context
-                        # --- END OF FIX ---
-                        
                         all_agent_responses.append(agent_response)
                         all_actions_to_execute.extend(agent_response.get('actions', []))
-            
+
             execution_result = {}
             if all_actions_to_execute:
                 execution_result = await self._execute_json_actions(user_id, all_actions_to_execute, db_manager)
@@ -219,7 +219,7 @@ class TodowaApp:
                 'original_command': message,
                 'agent_responses': all_agent_responses,
                 'execution_result': execution_result,
-                'user_context': user_context,
+                'user_context': user_context, # Still passed to AnsweringAgent
             }
             final_response_text = self.answering_agent.process_multi_response(final_response_context)
             return final_response_text
@@ -229,7 +229,7 @@ class TodowaApp:
             final_response_text = self.answering_agent.process_error("I ran into an unexpected problem.")
             return final_response_text
         finally:
-            # --- CHANGE 4: Use the dedicated history manager to log the full, structured interaction ---
+            # Always log the interaction after processing
             history_manager = self.user_histories.setdefault(user_id, ConversationHistory())
             history_manager.add_interaction(
                 user_input=message,
@@ -239,21 +239,28 @@ class TodowaApp:
             logger.info(f"Interaction logged for user '{user_id}'. History size: {len(history_manager.history)} turns.")
 
     async def _build_user_context(self, user_id: str) -> Dict[str, Any]:
+        """
+        Builds a basic user context without conversation history for specialized agents.
+        """
         context = {
             'user_info': {'timezone': 'GMT+7', 'user_id': user_id},
-            'ai_brain': []
+            'ai_brain': [] # AI Brain memories might be needed by some agents
         }
         if not self.supabase:
             return context
         try:
+            # Fetch AI Brain memories (user preferences, facts about user)
             brain_result = await self.supabase.table('ai_brain_memories').select('*').eq('user_id', user_id).limit(10).execute()
             if brain_result.data:
                 context['ai_brain'] = brain_result.data
         except Exception as e:
             logger.warning(f"Could not fetch ai_brain context from database: {e}")
         return context
-    
+
     async def _execute_json_actions(self, user_id: str, actions: List[Dict[str, Any]], db_manager: DatabaseManager) -> Dict[str, Any]:
+        """
+        Executes a list of actions derived from agent responses.
+        """
         if not actions: return {'success': True, 'results': []}
         try:
             executor = ActionExecutor(db_manager, user_id)
@@ -280,7 +287,7 @@ if not chat_app.initialize_system():
 def webhook():
     if request.method == 'GET':
         return jsonify({"status": "verified"}), 200
-        
+
     sender_phone = None
     try:
         data = request.get_json()
