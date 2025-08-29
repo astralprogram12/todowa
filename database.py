@@ -84,14 +84,17 @@ class DatabaseManager:
         """
         if not title:
             raise ValueError("Task title cannot be empty.")
+            
+        # <<< ROBUSTNESS FIX >>>
+        # Use a default value if the provided argument is None before calling .lower()
         task_data = {
             "user_id": self.user_id,
             "title": title,
-            "description": description,  # <-- NEWLY ADDED
+            "description": description,
             "notes": notes,
-            "priority": priority.lower(),
+            "priority": (priority or "medium").lower(),
             "status": "todo",
-            "category": category.lower(),
+            "category": (category or "general").lower(),
             "due_date": due_date,
         }
         res = self.supabase.table("tasks").insert(task_data).execute()
@@ -207,11 +210,14 @@ class DatabaseManager:
     def create_journal_entry_in_db(self, title: str, content: str, category: str, entry_type: str) -> Dict[str, Any]:
         if not title or not content:
             raise ValueError("Journal title and content cannot be empty.")
+            
+        # <<< ROBUSTNESS FIX >>>
+        # Use a default value if the provided category is None before calling .lower()
         entry_data = {
             "user_id": self.user_id,
             "title": title, 
             "content": content,
-            "category": category.lower(), 
+            "category": (category or "general").lower(), 
             "entry_type": entry_type,
         }
         res = self.supabase.table("journals").insert(entry_data).execute()
@@ -333,4 +339,4 @@ class DatabaseManager:
             logger.error(f"DB Error fetching recent context: {e}")
             # Return empty lists on error to prevent crashes
 
-        return results    
+        return results

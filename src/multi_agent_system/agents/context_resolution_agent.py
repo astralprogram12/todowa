@@ -106,7 +106,7 @@ class ContextResolutionAgent:
         5.  **Be Explicit with Plurals**: When a user's command refers to multiple items (e.g., "all of them," "every task with 'X'"), you **must** resolve and list every specific item that the command applies to within the `clarified_command`. This ensures absolute clarity for the next agent.
         6.  **Annotate Implied Context**: For messages that imply a deeper meaning, you must add a brief, clarifying note within the `clarified_command`. For instance, a command to "update" something implies a change from a previous state.
         7.  **No Referential Pronouns:** Your `clarified_command` must never contain pronouns like 'he', 'she', 'it', 'they', 'prior', 'previous', 'last', or 'them'. Always replace them with the specific noun they refer to.
-        8.  **Combine similar intent to the same agent NEVERE MENTIONED THE SAME AGENT TWICE
+        8.  **Combine similar intent to the same agent NEVER MENTION THE SAME AGENT TWICE
         ---
         ### **AGENT ROSTER & RESPONSIBILITIES**
 
