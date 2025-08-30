@@ -16,8 +16,7 @@ if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
 # --- Logging Configuration ---
-# Use logging.DEBUG to see the most detailed agent-level logs.
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logging.getLogger('httpx').setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
@@ -190,40 +189,31 @@ class TodowaApp:
         
         try:
             db_manager = DatabaseManager(self.supabase, user_id)
-            logger.info(f"💬 [START] Processing for user '{user_id}': '{message}'")
+            logger.info(f"💬 Processing for user '{user_id}': '{message}'")
             
             # STAGE 1: CONTEXT RESOLUTION
-            logger.debug("--- STAGE 1: CONTEXT RESOLUTION ---")
             conversation_history = history_manager.get_recent_context()
-            logger.debug(f"▶️  Sending to ContextResolutionAgent: (Message: '{message}', History: {conversation_history})")
             context_result = self.context_agent.resolve_context(message, conversation_history)
             
             if context_result.get("status") != "SUCCESS":
                  final_response_text = f"I need more information: {context_result.get('reason', 'Could you please rephrase?')}"
                  resolved_command = message
-                 logger.warning(f"Context resolution failed. Reason: {final_response_text}")
                  return final_response_text
 
             resolved_command = context_result.get("resolved_command", message)
-            logger.info(f"✅ Context Resolved. Original: '{message}' -> Resolved: '{resolved_command}'")
+            logger.info(f"✅ Context Resolved: '{resolved_command}'")
 
             # STAGE 2: AUDIT & PLANNING
-            logger.debug("\n--- STAGE 2: AUDIT & PLANNING ---")
-            logger.debug(f"▶️  Sending to AuditAgent: '{resolved_command}'")
             execution_plan = self.audit_agent.create_execution_plan(resolved_command)
             sub_tasks = execution_plan.get('sub_tasks', [])
-            logger.debug(f"◀️  Received from AuditAgent. Plan: {execution_plan}")
             
             logger.info(f"✅ Plan Created: Found {len(sub_tasks)} sub-task(s) for delegation.")
 
             if not sub_tasks:
-                logger.warning(f"Audit Agent failed to create a plan for: '{resolved_command}'. Routing to fallback.")
+                logger.warning(f"Audit Agent failed to create a plan for: '{resolved_command}'. Falling back.")
                 user_context = await self._build_user_context(user_id)
-                logger.debug(f"▶️  Sending to GeneralFallbackAgent: (Command: '{resolved_command}', Context: {user_context})")
                 agent_response = self.fallback_agent.process_command(user_command=resolved_command, user_context=user_context)
-                logger.debug(f"◀️  Received from GeneralFallbackAgent. Response: {agent_response}")
                 
-                logger.debug(f"▶️  Sending to AnsweringAgent for final response generation.")
                 final_response_text = self.answering_agent.process_response(agent_response)
                 return final_response_text
 
@@ -245,7 +235,6 @@ class TodowaApp:
 
             user_context = await self._build_user_context(user_id)
 
-            logger.debug("\n--- STAGE 3: DELEGATION & EXECUTION ---")
             for task in sub_tasks:
                 clarified_command = task.get('clarified_command')
                 route_to = task.get('route_to')
@@ -257,9 +246,7 @@ class TodowaApp:
                 
                 if route_to in agent_map:
                     specialist_agent = agent_map[route_to]
-                    logger.debug(f"  ▶️  Sending to {route_to}: (Command: '{clarified_command}', Context: {user_context})")
                     agent_response = specialist_agent.process_command(user_command=clarified_command, user_context=user_context)
-                    logger.debug(f"  ◀️  Received from {route_to}. Response: {agent_response}")
                     
                     if agent_response:
                         if 'user_context' not in agent_response:
@@ -270,14 +257,8 @@ class TodowaApp:
             
             execution_result = {}
             if all_actions_to_execute:
-                logger.debug("\n--- STAGE 4: DATABASE ACTIONS ---")
-                logger.debug(f"▶️  Executing actions: {all_actions_to_execute}")
                 execution_result = await self._execute_json_actions(user_id, all_actions_to_execute, db_manager)
-                logger.debug(f"◀️  Execution result: {execution_result}")
-            else:
-                logger.info("No database actions to execute.")
 
-            logger.debug("\n--- STAGE 5: FINAL RESPONSE GENERATION ---")
             final_response_context = {
                 'source': 'MultiAgentExecution',
                 'original_command': message,
@@ -285,9 +266,7 @@ class TodowaApp:
                 'execution_result': execution_result,
                 'user_context': user_context,
             }
-            logger.debug(f"▶️  Sending to AnsweringAgent: {final_response_context}")
             final_response_text = self.answering_agent.process_multi_response(final_response_context)
-            logger.info(f"✅ [END] Final response for user '{user_id}': '{final_response_text}'")
             return final_response_text
 
         except Exception as e:
@@ -295,7 +274,6 @@ class TodowaApp:
             final_response_text = self.answering_agent.process_error("I ran into an unexpected problem.")
             return final_response_text
         finally:
-            # This will run regardless of success or failure.
             history_manager.add_interaction(
                 user_input=message,
                 clarified_input=resolved_command,
@@ -310,9 +288,7 @@ class TodowaApp:
         if not self.supabase:
             return context
         try:
-            # The original code had an await here, but the supabase-py execute() method is synchronous.
-            # Assuming it should be synchronous based on library usage.
-            brain_result = self.supabase.table('ai_brain_memories').select('*').eq('user_id', user_id).limit(10).execute()
+            brain_result = await self.supabase.table('ai_brain_memories').select('*').eq('user_id', user_id).limit(10).execute()
             if brain_result.data:
                 context['ai_brain'] = brain_result.data
         except Exception as e:
