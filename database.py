@@ -305,6 +305,23 @@ class DatabaseManager:
     def delete_memory(self, memory_id: str) -> bool:
         res = self.supabase.table('ai_brain_memories').delete().eq('id', memory_id).eq('user_id', self.user_id).execute()
         return bool(self._handle_db_response(res, f"Failed to delete memory {memory_id}"))
+
+    # --- Tech Support Table Operations ---
+    def create_tech_support_ticket(self, message: str, status: str = "open") -> Dict[str, Any]:
+        """Creates a new tech support ticket in the database."""
+        if not message:
+            raise ValueError("Ticket message cannot be empty.")
+
+        ticket_data = {
+            "user_id": self.user_id,
+            "message": message,
+            "status": status,
+        }
+        res = self.supabase.table("tech_support_tickets").insert(ticket_data).execute()
+        data = self._handle_db_response(res, "Failed to create tech support ticket")
+        if not data:
+            raise Exception("Database failed to return created tech support ticket data.")
+        return data[0]
     
     ##################33
 

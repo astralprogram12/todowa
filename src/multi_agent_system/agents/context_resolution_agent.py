@@ -46,6 +46,10 @@ You are a Context Clarification Agent and Polyglot Language Master for a persona
 6.  **CREATE A SELF-CONTAINED COMMAND:** The final `resolved_command` must be fully understandable on its own, without needing any conversation history.
 
 7.  **STRIP CONVERSATIONAL FILLER:** Remove fluff (e.g., "please", "can you") to produce a direct instruction.
+
+8.  **HANDLE USER FRUSTRATION:** If the user expresses frustration, confusion, or says something is "not working", you MUST interpret this as a request for technical support. The `resolved_command` should be to 'create a new tech support ticket' with the user's full message as the content.
+
+9.  **HANDLE GUIDE REQUESTS:** If the user asks "how do I use this" or a similar help question, you MUST interpret this as a request for guidance. The `resolved_command` should be 'get help on how to use the app'.
 """
 
     def _get_response_format(self) -> str:
@@ -134,6 +138,16 @@ JSON: {"status": "SUCCESS", "resolved_command": "add journal note titled 'Meetin
 Command: "i just spent 50k idr on lunch"
 JSON: {"status": "SUCCESS", "resolved_command": "add expense of 50000 IDR for lunch"}
 // Rationale: Recognized a financial transaction, structured it with currency, and categorized the spending.
+
+**12. User Frustration / Tech Support**
+Command: "this isn't working, I'm so frustrated! it's not saving my tasks"
+JSON: {"status": "SUCCESS", "resolved_command": "create a new tech support ticket with the message 'this isn't working, I'm so frustrated! it's not saving my tasks'"}
+// Rationale: Recognized user frustration and a technical issue, converting the entire message into a tech support ticket.
+
+**13. User Guide Request**
+Command: "how do I use this app?"
+JSON: {"status": "SUCCESS", "resolved_command": "get help on how to use the app"}
+// Rationale: Recognized a request for help and converted it into a structured command.
 """
 
     def build(self, user_command: str, conversation_history: str) -> str:

@@ -58,6 +58,8 @@ try:
     from src.multi_agent_system.agents.general_fallback_agent import GeneralFallbackAgent
     from src.multi_agent_system.agents.finding_agent import FindingAgent
     from src.multi_agent_system.agents.financial_agent import FinancialAgent
+    from src.multi_agent_system.agents.guide_agent import GuideAgent
+    from src.multi_agent_system.agents.tech_support_agent import TechSupportAgent
 
 except ImportError as e:
     logger.critical(f"❌ Import Error: {e}. Ensure all dependencies and local modules are present.")
@@ -257,6 +259,8 @@ class TodowaApp:
             schedule_agent = ScheduleAgent(ai_model=self.api_key_manager.create_ai_model("schedule_agent"), supabase=user_supabase_client)
             finding_agent = FindingAgent(ai_model=self.api_key_manager.create_ai_model("finding_agent"), supabase=user_supabase_client)
             financial_agent = FinancialAgent(ai_model=self.api_key_manager.create_ai_model("financial_agent"), supabase=user_supabase_client)
+            tech_support_agent = TechSupportAgent(ai_model=self.api_key_manager.create_ai_model("tech_support_agent"), supabase=user_supabase_client)
+            guide_agent = GuideAgent()
             fallback_agent = GeneralFallbackAgent(ai_model=self.api_key_manager.create_ai_model("fallback_agent"), supabase=user_supabase_client)
 
             if not sub_tasks:
@@ -281,6 +285,8 @@ class TodowaApp:
                 "ScheduleAgent": schedule_agent,
                 "FindingAgent": finding_agent,
                 "FinancialAgent": financial_agent,
+                "TechSupportAgent": tech_support_agent,
+                "GuideAgent": guide_agent,
                 "GeneralFallback": fallback_agent,
             }
 
