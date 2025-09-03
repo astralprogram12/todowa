@@ -340,3 +340,60 @@ class DatabaseManager:
             # Return empty lists on error to prevent crashes
 
         return results
+
+    # --- Financial Table Operations ---
+
+    def create_financial_transaction_in_db(self, transaction_type: str, amount: float, currency: str, category: str, description: str) -> Dict[str, Any]:
+        """Inserts a new financial transaction into the database."""
+        if not all([transaction_type, amount, currency, category]):
+            raise ValueError("Missing required fields for financial transaction.")
+
+        transaction_data = {
+            "user_id": self.user_id,
+            "transaction_type": transaction_type,
+            "amount": amount,
+            "currency": currency,
+            "category": category,
+            "description": description,
+            "transaction_date": datetime.now(timezone.utc).isoformat()
+        }
+        res = self.supabase.table("financial_transactions").insert(transaction_data).execute()
+        data = self._handle_db_response(res, "Failed to insert financial transaction")
+        if not data:
+            raise Exception("Database failed to return created financial transaction data.")
+        return data[0]
+
+    def create_or_update_budget_in_db(self, category: str, amount: float, period: str) -> Dict[str, Any]:
+        """Creates or updates a budget for a given category and period."""
+        if not all([category, amount, period]):
+            raise ValueError("Missing required fields for budget.")
+
+        # Determine start and end dates for the budget period
+        today = date.today()
+        if period == 'monthly':
+            start_date = today.replace(day=1)
+            end_date = (start_date + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+        elif period == 'weekly':
+            start_date = today - timedelta(days=today.weekday())
+            end_date = start_date + timedelta(days=6)
+        elif period == 'yearly':
+            start_date = today.replace(month=1, day=1)
+            end_date = today.replace(month=12, day=31)
+        else:
+            raise ValueError(f"Unsupported budget period: {period}")
+
+        budget_data = {
+            "user_id": self.user_id,
+            "category": category,
+            "amount": amount,
+            "period": period,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat()
+        }
+
+        # Upsert on the unique constraint (user_id, category, period)
+        res = self.supabase.table("budgets").upsert(budget_data, on_conflict="user_id,category,period").execute()
+        data = self._handle_db_response(res, f"Failed to upsert budget for category {category}")
+        if not data:
+            raise Exception("Database failed to return created/updated budget data.")
+        return data[0]
