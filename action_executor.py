@@ -12,6 +12,8 @@ from database import DatabaseManager
 # --- CORRECT IMPORTS ---
 # Import the registry from tools.py
 from tools import tool_registry 
+# Import the context function from ai_tools.py
+from ai_tools import set_context
 # We import ai_tools itself to make sure Python runs it and the @tool decorators register the functions
 import ai_tools
 
@@ -31,6 +33,9 @@ class ActionExecutor:
             
         self.db_manager = db_manager
         self.user_id = user_id
+
+        # This call sets the global context for the tool decorator
+        set_context(self.db_manager.supabase, self.user_id)
 
     def execute_actions(self, actions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -53,9 +58,6 @@ class ActionExecutor:
 
             if tool_name in tool_registry:
                 try:
-                    # Add the db_manager to the parameters for tools that need it.
-                    if tool_name != "internet_search":
-                        params['db_manager'] = self.db_manager
                     # Execute the tool by name, unpacking the correctly built params dictionary
                     result = tool_registry.execute(name=tool_name, **params)
                     all_results.append(result)
