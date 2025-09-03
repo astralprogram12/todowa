@@ -60,9 +60,10 @@ You are a world-class AI Master Router and Intelligent Planner. Your function is
 1.  **`TaskAgent`**: Handles managing actionable to-do lists, including items with deadlines.
 2.  **`ScheduleAgent`**: Handles reminders, appointments, and recurring events with specific times.
 3.  **`JournalAgent`**: Handles storing non-actionable facts, notes, and memories.
-4.  **`FindingAgent`**: Handles searching for information.
-5.  **`BrainAgent`**: Handles changing the AI's behavior or preferences.
-6.  **`GeneralFallback`**: Handles conversation, advice, and creative requests.
+4.  **`FinancialAgent`**: Handles tracking income, expenses, and budgets.
+5.  **`FindingAgent`**: Handles searching for information.
+6.  **`BrainAgent`**: Handles changing the AI's behavior or preferences.
+7.  **`GeneralFallback`**: Handles conversation, advice, and creative requests.
 """
 
     def _get_response_format(self) -> str:
@@ -120,6 +121,13 @@ Resolved Command: "remind me to call the vendor tomorrow at 10am, schedule a tea
 JSON Output:
 ```json
 { "sub_tasks": [{"route_to": "ScheduleAgent", "suggestion": "(Suggestion: I'm grouping these for the ScheduleAgent as they both involve scheduling specific times.)", "clarified_command": "remind me to call the vendor tomorrow at 10am, schedule a team sync for 3pm"}, {"route_to": "JournalAgent", "suggestion": "(Suggestion: I'm routing this to the JournalAgent because it's a non-actionable piece of information to be logged.)", "clarified_command": "log that the project kickoff was successful"}]}
+```
+
+**Example 6: Routing to the Financial Agent**
+Resolved Command: "log that I spent $45 on groceries and got paid $1500 for the freelance gig"
+JSON Output:
+```json
+{ "sub_tasks": [{"route_to": "FinancialAgent", "suggestion": "(Suggestion: I'm routing this to the FinancialAgent because the user is logging income and expenses.)", "clarified_command": "log that I spent $45 on groceries and got paid $1500 for the freelance gig"}]}
 ```
 """
 

@@ -270,3 +270,27 @@ def delete_schedule(db_manager: DatabaseManager, schedule_id: str) -> bool:
     NEW: Deletes a schedule. The agent must provide the unique ID.
     """
     return db_manager.delete_schedule(schedule_id=schedule_id)
+
+# ==================== FINANCIAL TOOLS ====================
+
+@tool(name="create_financial_transaction", description="Creates a new financial transaction (income or expense).", category="financial")
+@db_tool_handler
+def create_financial_transaction(db_manager: DatabaseManager, transaction_type: str, amount: float, currency: str, category: str, description: str):
+    """Creates a new financial transaction record."""
+    return db_manager.create_financial_transaction_in_db(
+        transaction_type=transaction_type,
+        amount=amount,
+        currency=currency,
+        category=category,
+        description=description
+    )
+
+@tool(name="create_or_update_budget", description="Creates or updates a budget for a specific category.", category="financial")
+@db_tool_handler
+def create_or_update_budget(db_manager: DatabaseManager, category: str, amount: float, period: str):
+    """Creates or updates a budget record."""
+    return db_manager.create_or_update_budget_in_db(
+        category=category,
+        amount=amount,
+        period=period
+    )
