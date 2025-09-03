@@ -21,13 +21,7 @@ from ddgs.ddgs import DDGS
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Global context for dependency injection
-_context = {"supabase": None, "user_id": None}
-
-def set_context(supabase_client, user_id: str):
-    """Sets the global context for Supabase and user ID."""
-    _context["supabase"] = supabase_client
-    _context["user_id"] = user_id
+# Global context has been removed in favor of passing db_manager directly.
 
 
 
@@ -75,18 +69,19 @@ def internet_search(query: str, num_results: int = 5) -> Dict[str, Any]:
 # ==================== DECORATOR FOR ABSTRACTION ====================
 
 def db_tool_handler(func):
-    """Decorator to handle database connection, execution, and response formatting."""
+    """
+    Decorator to handle response formatting and error handling for database tools.
+    It expects 'db_manager' to be passed as a keyword argument to the decorated function.
+    """
     @wraps(func)
     def wrapper(*args, **kwargs):
         try:
-            supabase = _context.get("supabase")
-            user_id = _context.get("user_id")
-            if not supabase or not user_id:
-                raise ConnectionError("Database context not set.")
-
-            db_manager = DatabaseManager(supabase, user_id)
+            # The db_manager is now passed directly by the ActionExecutor.
+            if 'db_manager' not in kwargs:
+                raise ValueError(f"Tool '{func.__name__}' requires a 'db_manager' argument.")
             
-            result_data = func(db_manager, *args, **kwargs)
+            # The decorated function is called with all its arguments.
+            result_data = func(*args, **kwargs)
             
             return {"success": True, "data": result_data}
         except Exception as e:
