@@ -81,3 +81,11 @@ MAX_AGENT_LOOPS: int = 5        # Safety limit for AI agent loops to prevent run
 
 CHAT_TEST_USER_ID: str = "e4824ec3-c9c4-4563-91f8-56077aa64d63"  # A test user UUID from your Supabase db
 CHAT_TEST_PHONE: str = "CHAT_TEST_USER"                          # A special identifier for chat testing
+
+
+# ==============================================================================
+# --- RLS (ROW LEVEL SECURITY) CONFIGURATION ---
+# These keys are required to generate user-specific JWTs for RLS.
+# ==============================================================================
+SUPABASE_JWT_SECRET: Optional[str] = os.environ.get("SUPABASE_JWT_SECRET", "your-super-secret-jwt-token-with-at-least-32-characters-long")
+SUPABASE_ANON_KEY: Optional[str] = os.environ.get("SUPABASE_ANON_KEY", "your-anon-key")

@@ -3,11 +3,12 @@ import os
 import sys
 import logging
 import asyncio
-from datetime import datetime
-from typing import Dict, Any, List
+from datetime import datetime, timezone, timedelta
+from typing import Dict, Any, List, Optional
 
 # --- Third-Party Imports ---
 from flask import Flask, request, jsonify
+import jwt
 
 # --- Project-Specific Imports ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -19,6 +20,17 @@ if src_path not in sys.path:
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logging.getLogger('httpx').setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
+
+
+def create_user_jwt(user_id: str, jwt_secret: str) -> str:
+    """Generates a JWT for a given user ID."""
+    payload = {
+        "sub": user_id,
+        "role": "authenticated",
+        "iat": datetime.now(timezone.utc),
+        "exp": datetime.now(timezone.utc) + timedelta(hours=1)
+    }
+    return jwt.encode(payload, jwt_secret, algorithm="HS256")
 
 
 try:
@@ -179,6 +191,27 @@ class TodowaApp:
             self._is_initialized = False
             return False
 
+    def create_user_supabase_client(self, user_id: str) -> Optional[Client]:
+        """
+        Creates a new Supabase client authenticated as a specific user
+        by generating a custom JWT. This client will enforce RLS.
+        """
+        if not self.supabase or not hasattr(config, 'SUPABASE_JWT_SECRET') or not hasattr(config, 'SUPABASE_ANON_KEY'):
+            logger.error("System not properly initialized for RLS. SUPABASE_JWT_SECRET or SUPABASE_ANON_KEY missing from config.")
+            return None
+
+        try:
+            user_jwt = create_user_jwt(user_id, config.SUPABASE_JWT_SECRET)
+            # Create a new client instance. We use the anon key, and the JWT will handle user auth.
+            user_supabase_client = create_client(config.SUPABASE_URL, config.SUPABASE_ANON_KEY)
+            # Set the session for the client. This will attach the Authorization header for all subsequent requests.
+            user_supabase_client.auth.set_session(access_token=user_jwt, refresh_token="dummy-refresh-token-for-rls")
+            logger.info(f"Successfully created RLS-enabled client for user {user_id}")
+            return user_supabase_client
+        except Exception as e:
+            logger.error(f"Error creating user-specific Supabase client for {user_id}: {e}", exc_info=True)
+            return None
+
     async def process_message_async(self, message: str, user_id: str, user_supabase_client: Client) -> str:
         if not self._is_initialized:
             return "❌ The server is not properly initialized. Please contact support."
@@ -226,7 +259,7 @@ class TodowaApp:
                 user_context = await self._build_user_context(user_id, user_supabase_client)
                 agent_response = fallback_agent.process_command(user_command=resolved_command, user_context=user_context)
                 
-                final_response_text = self.answering_agent.process_response(agent_response)
+                final_response_text = answering_agent.process_response(agent_response)
                 return final_response_text
 
             TASK_LIMIT = 3
@@ -355,16 +388,13 @@ def webhook():
             services.send_fonnte_message(sender_phone, limit_message)
             return jsonify({"status": "limit_exceeded"}), 429
 
-        # Create a user-specific Supabase client that will enforce RLS
         user_supabase_client = chat_app.create_user_supabase_client(user_id)
         if not user_supabase_client:
-            # If client creation fails, it's a server-side issue.
-            logger.error(f"Failed to create a dedicated client for user {user_id}.")
-            error_reply = "I'm having trouble with your session right now. Please try again in a moment."
+            # If client creation fails, send an error and stop.
+            error_reply = "I'm having trouble authenticating your session right now. Please try again later."
             services.send_fonnte_message(sender_phone, error_reply)
             return jsonify({"status": "error", "message": "User client creation failed"}), 500
 
-        # Process the message using the RLS-enabled client
         response_text = asyncio.run(chat_app.process_message_async(message_text, user_id, user_supabase_client))
         services.send_fonnte_message(sender_phone, response_text)
         return jsonify({"status": "success"}), 200
