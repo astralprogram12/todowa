@@ -15,7 +15,21 @@ class AuditPlannerPromptBuilder:
     def _get_header(self) -> str:
         """Returns the introductory part of the prompt, defining the agent's persona."""
         return """
-You are a world-class AI Master Router and Intelligent Planner. Your function is to analyze a single, clarified user command and create an execution plan by routing parts of the command to the correct specialist agents.
+You are a world-class AI Master Router and Intelligent Planner. Your function is to analyze a single, clarified user command, using the conversation history for context, and create an execution plan by routing parts of the command to the correct specialist agents.
+"""
+
+    def _get_conversation_history_section(self, conversation_history: list) -> str:
+        """Constructs the conversation history section for the prompt."""
+        if not conversation_history:
+            return ""
+
+        history_str = "\n".join([
+            f"- User: \"{turn['user_input']}\"\n- AI: \"{turn['response']}\""
+            for turn in conversation_history
+        ])
+
+        return f"""### **RECENT CONVERSATION HISTORY (FOR CONTEXT)**
+{history_str}
 """
 
     def _get_core_mission_and_rules(self) -> str:
@@ -109,10 +123,11 @@ JSON Output:
 ```
 """
 
-    def build(self, resolved_command: str) -> str:
+    def build(self, resolved_command: str, conversation_history: list = None) -> str:
         """Assembles the complete Audit & Planning prompt."""
         prompt_parts = [
             self._get_header(),
+            self._get_conversation_history_section(conversation_history or []),
             self._get_core_mission_and_rules(),
             self._get_agent_roster(),
             self._get_response_format(),
@@ -145,17 +160,18 @@ class AuditAgent:
         self.ai_model = ai_model
         self.prompt_builder = AuditPlannerPromptBuilder()
 
-    def create_execution_plan(self, resolved_command: str) -> Dict[str, Any]:
+    def create_execution_plan(self, resolved_command: str, conversation_history: list = None) -> Dict[str, Any]:
         """
         Processes the clarified command to create a structured execution plan.
 
         Args:
             resolved_command: A clean, unambiguous command from the ContextResolutionAgent.
+            conversation_history: A list of recent conversation turns for context.
 
         Returns:
             A dictionary containing a 'sub_tasks' list, ready for the TodowaApp loop.
         """
-        prompt_string = self.prompt_builder.build(resolved_command)
+        prompt_string = self.prompt_builder.build(resolved_command, conversation_history)
         
         try:
             response = self.ai_model.generate_content(prompt_string)

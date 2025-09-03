@@ -204,7 +204,7 @@ class TodowaApp:
             logger.info(f"✅ Context Resolved: '{resolved_command}'")
 
             # STAGE 2: AUDIT & PLANNING
-            execution_plan = self.audit_agent.create_execution_plan(resolved_command)
+            execution_plan = self.audit_agent.create_execution_plan(resolved_command, conversation_history)
             sub_tasks = execution_plan.get('sub_tasks', [])
             
             logger.info(f"✅ Plan Created: Found {len(sub_tasks)} sub-task(s) for delegation.")
