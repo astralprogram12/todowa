@@ -64,6 +64,8 @@ You are a world-class AI Master Router and Intelligent Planner. Your function is
 5.  **`FindingAgent`**: Handles searching for information.
 6.  **`BrainAgent`**: Handles changing the AI's behavior or preferences.
 7.  **`GeneralFallback`**: Handles conversation, advice, and creative requests.
+8.  **`TechSupportAgent`**: Handles user frustration and technical issues by creating a support ticket.
+9.  **`GuideAgent`**: Provides help and instructions on how to use the app.
 """
 
     def _get_response_format(self) -> str:
@@ -128,6 +130,20 @@ Resolved Command: "log that I spent $45 on groceries and got paid $1500 for the 
 JSON Output:
 ```json
 { "sub_tasks": [{"route_to": "FinancialAgent", "suggestion": "(Suggestion: I'm routing this to the FinancialAgent because the user is logging income and expenses.)", "clarified_command": "log that I spent $45 on groceries and got paid $1500 for the freelance gig"}]}
+```
+
+**Example 7: Routing to the Tech Support Agent**
+Resolved Command: "create a new tech support ticket with the message 'this isn't working, I'm so frustrated! it's not saving my tasks'"
+JSON Output:
+```json
+{ "sub_tasks": [{"route_to": "TechSupportAgent", "suggestion": "(Suggestion: I'm routing this to the TechSupportAgent because the user is reporting a technical issue.)", "clarified_command": "create a new tech support ticket with the message 'this isn't working, I'm so frustrated! it's not saving my tasks'"}]}
+```
+
+**Example 8: Routing to the Guide Agent**
+Resolved Command: "get help on how to use the app"
+JSON Output:
+```json
+{ "sub_tasks": [{"route_to": "GuideAgent", "suggestion": "(Suggestion: I'm routing this to the GuideAgent because the user is asking for help.)", "clarified_command": "get help on how to use the app"}]}
 ```
 """
 

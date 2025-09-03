@@ -289,3 +289,11 @@ def create_or_update_budget(db_manager: DatabaseManager, category: str, amount: 
         amount=amount,
         period=period
     )
+
+# ==================== TECH SUPPORT TOOLS ====================
+
+@tool(name="create_tech_support_ticket", description="Creates a new tech support ticket for a user.", category="tech_support")
+@db_tool_handler
+def create_tech_support_ticket(db_manager: DatabaseManager, message: str) -> Dict[str, Any]:
+    """Creates a new tech support ticket record."""
+    return db_manager.create_tech_support_ticket(message=message)
