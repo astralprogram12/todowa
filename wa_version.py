@@ -27,6 +27,7 @@ def create_user_jwt(user_id: str, jwt_secret: str) -> str:
     payload = {
         "sub": user_id,
         "role": "authenticated",
+        "aud": "authenticated",
         "iat": datetime.now(timezone.utc),
         "exp": datetime.now(timezone.utc) + timedelta(hours=1)
     }
