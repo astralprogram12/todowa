@@ -44,6 +44,7 @@ try:
     from src.multi_agent_system.agents.answering_agent import AnsweringAgent
     from src.multi_agent_system.agents.general_fallback_agent import GeneralFallbackAgent
     from src.multi_agent_system.agents.finding_agent import FindingAgent
+    from src.multi_agent_system.agents.financial_agent import FinancialAgent
 
 except ImportError as e:
     logger.critical(f"❌ Import Error: {e}. Ensure all dependencies and local modules are present.")
@@ -139,6 +140,7 @@ class TodowaApp:
         self.task_agent: TaskAgent = None
         self.schedule_agent: ScheduleAgent = None
         self.finding_agent: FindingAgent = None
+        self.financial_agent: FinancialAgent = None
         self.fallback_agent: GeneralFallbackAgent = None
         self.answering_agent: AnsweringAgent = None
         self._is_initialized = False
@@ -165,6 +167,7 @@ class TodowaApp:
             self.task_agent = TaskAgent(ai_model=self.api_key_manager.create_ai_model("task_agent"), supabase=self.supabase)
             self.schedule_agent = ScheduleAgent(ai_model=self.api_key_manager.create_ai_model("schedule_agent"), supabase=self.supabase)
             self.finding_agent = FindingAgent(ai_model=self.api_key_manager.create_ai_model("finding_agent"), supabase=self.supabase)
+            self.financial_agent = FinancialAgent(ai_model=self.api_key_manager.create_ai_model("financial_agent"), supabase=self.supabase)
             self.fallback_agent = GeneralFallbackAgent(ai_model=self.api_key_manager.create_ai_model("fallback_agent"), supabase=self.supabase)
             self.answering_agent = AnsweringAgent(ai_model=self.api_key_manager.create_chat_model("answering_agent"), supabase=self.supabase)
 
@@ -204,7 +207,7 @@ class TodowaApp:
             logger.info(f"✅ Context Resolved: '{resolved_command}'")
 
             # STAGE 2: AUDIT & PLANNING
-            execution_plan = self.audit_agent.create_execution_plan(resolved_command)
+            execution_plan = self.audit_agent.create_execution_plan(resolved_command, conversation_history)
             sub_tasks = execution_plan.get('sub_tasks', [])
             
             logger.info(f"✅ Plan Created: Found {len(sub_tasks)} sub-task(s) for delegation.")
@@ -230,6 +233,7 @@ class TodowaApp:
                 "BrainAgent": self.brain_agent,
                 "ScheduleAgent": self.schedule_agent,
                 "FindingAgent": self.finding_agent,
+                "FinancialAgent": self.financial_agent,
                 "GeneralFallback": self.fallback_agent,
             }
 

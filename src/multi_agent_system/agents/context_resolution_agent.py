@@ -129,6 +129,11 @@ JSON: {"status": "SUCCESS", "resolved_command": "for the tasks 'Review slides' a
 Command: "About the meeting: the client was happy. Key takeaway is to focus on marketing. Follow-up is next Tuesday."
 JSON: {"status": "SUCCESS", "resolved_command": "add journal note titled 'Meeting Summary': The client was happy. Key takeaway is to focus on marketing. The follow-up is scheduled for next Tuesday."}
 // Rationale: Synthesized a multi-sentence, informal note into a structured journal entry with an inferred title.
+
+**11. Financial Command Structuring**
+Command: "i just spent 50k idr on lunch"
+JSON: {"status": "SUCCESS", "resolved_command": "add expense of 50000 IDR for lunch"}
+// Rationale: Recognized a financial transaction, structured it with currency, and categorized the spending.
 """
 
     def build(self, user_command: str, conversation_history: str) -> str:

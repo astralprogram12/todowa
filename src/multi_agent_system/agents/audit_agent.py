@@ -15,7 +15,21 @@ class AuditPlannerPromptBuilder:
     def _get_header(self) -> str:
         """Returns the introductory part of the prompt, defining the agent's persona."""
         return """
-You are a world-class AI Master Router and Intelligent Planner. Your function is to analyze a single, clarified user command and create an execution plan by routing parts of the command to the correct specialist agents.
+You are a world-class AI Master Router and Intelligent Planner. Your function is to analyze a single, clarified user command, using the conversation history for context, and create an execution plan by routing parts of the command to the correct specialist agents.
+"""
+
+    def _get_conversation_history_section(self, conversation_history: list) -> str:
+        """Constructs the conversation history section for the prompt."""
+        if not conversation_history:
+            return ""
+
+        history_str = "\n".join([
+            f"- User: \"{turn['user_input']}\"\n- AI: \"{turn['response']}\""
+            for turn in conversation_history
+        ])
+
+        return f"""### **RECENT CONVERSATION HISTORY (FOR CONTEXT)**
+{history_str}
 """
 
     def _get_core_mission_and_rules(self) -> str:
@@ -46,9 +60,10 @@ You are a world-class AI Master Router and Intelligent Planner. Your function is
 1.  **`TaskAgent`**: Handles managing actionable to-do lists, including items with deadlines.
 2.  **`ScheduleAgent`**: Handles reminders, appointments, and recurring events with specific times.
 3.  **`JournalAgent`**: Handles storing non-actionable facts, notes, and memories.
-4.  **`FindingAgent`**: Handles searching for information.
-5.  **`BrainAgent`**: Handles changing the AI's behavior or preferences.
-6.  **`GeneralFallback`**: Handles conversation, advice, and creative requests.
+4.  **`FinancialAgent`**: Handles tracking income, expenses, and budgets.
+5.  **`FindingAgent`**: Handles searching for information.
+6.  **`BrainAgent`**: Handles changing the AI's behavior or preferences.
+7.  **`GeneralFallback`**: Handles conversation, advice, and creative requests.
 """
 
     def _get_response_format(self) -> str:
@@ -107,12 +122,20 @@ JSON Output:
 ```json
 { "sub_tasks": [{"route_to": "ScheduleAgent", "suggestion": "(Suggestion: I'm grouping these for the ScheduleAgent as they both involve scheduling specific times.)", "clarified_command": "remind me to call the vendor tomorrow at 10am, schedule a team sync for 3pm"}, {"route_to": "JournalAgent", "suggestion": "(Suggestion: I'm routing this to the JournalAgent because it's a non-actionable piece of information to be logged.)", "clarified_command": "log that the project kickoff was successful"}]}
 ```
+
+**Example 6: Routing to the Financial Agent**
+Resolved Command: "log that I spent $45 on groceries and got paid $1500 for the freelance gig"
+JSON Output:
+```json
+{ "sub_tasks": [{"route_to": "FinancialAgent", "suggestion": "(Suggestion: I'm routing this to the FinancialAgent because the user is logging income and expenses.)", "clarified_command": "log that I spent $45 on groceries and got paid $1500 for the freelance gig"}]}
+```
 """
 
-    def build(self, resolved_command: str) -> str:
+    def build(self, resolved_command: str, conversation_history: list = None) -> str:
         """Assembles the complete Audit & Planning prompt."""
         prompt_parts = [
             self._get_header(),
+            self._get_conversation_history_section(conversation_history or []),
             self._get_core_mission_and_rules(),
             self._get_agent_roster(),
             self._get_response_format(),
@@ -145,17 +168,18 @@ class AuditAgent:
         self.ai_model = ai_model
         self.prompt_builder = AuditPlannerPromptBuilder()
 
-    def create_execution_plan(self, resolved_command: str) -> Dict[str, Any]:
+    def create_execution_plan(self, resolved_command: str, conversation_history: list = None) -> Dict[str, Any]:
         """
         Processes the clarified command to create a structured execution plan.
 
         Args:
             resolved_command: A clean, unambiguous command from the ContextResolutionAgent.
+            conversation_history: A list of recent conversation turns for context.
 
         Returns:
             A dictionary containing a 'sub_tasks' list, ready for the TodowaApp loop.
         """
-        prompt_string = self.prompt_builder.build(resolved_command)
+        prompt_string = self.prompt_builder.build(resolved_command, conversation_history)
         
         try:
             response = self.ai_model.generate_content(prompt_string)
