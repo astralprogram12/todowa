@@ -160,13 +160,14 @@ class TodowaApp:
             
             self.context_agent = ContextResolutionAgent(ai_model=self.api_key_manager.create_ai_model("context_agent"))
             self.audit_agent = AuditAgent(ai_model=self.api_key_manager.create_ai_model("audit_agent"))
-            self.journal_agent = JournalAgent(ai_model=self.api_key_manager.create_ai_model("journal_agent"), supabase=self.supabase)
             self.brain_agent = BrainAgent(ai_model=self.api_key_manager.create_ai_model("brain_agent"))
-            self.task_agent = TaskAgent(ai_model=self.api_key_manager.create_ai_model("task_agent"), supabase=self.supabase)
-            self.schedule_agent = ScheduleAgent(ai_model=self.api_key_manager.create_ai_model("schedule_agent"), supabase=self.supabase)
-            self.finding_agent = FindingAgent(ai_model=self.api_key_manager.create_ai_model("finding_agent"), supabase=self.supabase)
-            self.fallback_agent = GeneralFallbackAgent(ai_model=self.api_key_manager.create_ai_model("fallback_agent"), supabase=self.supabase)
-            self.answering_agent = AnsweringAgent(ai_model=self.api_key_manager.create_chat_model("answering_agent"), supabase=self.supabase)
+            # DB-dependent agents are now initialized per-request in process_message_async
+            self.journal_agent = None
+            self.task_agent = None
+            self.schedule_agent = None
+            self.finding_agent = None
+            self.fallback_agent = None
+            self.answering_agent = None
 
             logger.info("✅ All specialized agents initialized.")
             logger.info("✅ System is fully operational!")
@@ -178,17 +179,21 @@ class TodowaApp:
             self._is_initialized = False
             return False
 
-    async def process_message_async(self, message: str, user_id: str) -> str:
+    async def process_message_async(self, message: str, user_id: str, user_supabase_client: Client) -> str:
         if not self._is_initialized:
             return "❌ The server is not properly initialized. Please contact support."
 
         final_response_text = ""
         resolved_command = ""
-        # Instantiate the database history manager for each request.
-        history_manager = DatabaseConversationHistory(self.supabase, user_id)
+
+        # Answering agent is used in success and error paths, so initialize it early.
+        answering_agent = AnsweringAgent(ai_model=self.api_key_manager.create_chat_model("answering_agent"), supabase=user_supabase_client)
+
+        # Instantiate managers with the user-specific, RLS-enabled client
+        history_manager = DatabaseConversationHistory(user_supabase_client, user_id)
         
         try:
-            db_manager = DatabaseManager(self.supabase, user_id)
+            db_manager = DatabaseManager(user_supabase_client, user_id)
             logger.info(f"💬 Processing for user '{user_id}': '{message}'")
             
             # STAGE 1: CONTEXT RESOLUTION
@@ -209,10 +214,17 @@ class TodowaApp:
             
             logger.info(f"✅ Plan Created: Found {len(sub_tasks)} sub-task(s) for delegation.")
 
+            # Initialize DB-dependent agents now that we need them
+            task_agent = TaskAgent(ai_model=self.api_key_manager.create_ai_model("task_agent"), supabase=user_supabase_client)
+            journal_agent = JournalAgent(ai_model=self.api_key_manager.create_ai_model("journal_agent"), supabase=user_supabase_client)
+            schedule_agent = ScheduleAgent(ai_model=self.api_key_manager.create_ai_model("schedule_agent"), supabase=user_supabase_client)
+            finding_agent = FindingAgent(ai_model=self.api_key_manager.create_ai_model("finding_agent"), supabase=user_supabase_client)
+            fallback_agent = GeneralFallbackAgent(ai_model=self.api_key_manager.create_ai_model("fallback_agent"), supabase=user_supabase_client)
+
             if not sub_tasks:
                 logger.warning(f"Audit Agent failed to create a plan for: '{resolved_command}'. Falling back.")
-                user_context = await self._build_user_context(user_id)
-                agent_response = self.fallback_agent.process_command(user_command=resolved_command, user_context=user_context)
+                user_context = await self._build_user_context(user_id, user_supabase_client)
+                agent_response = fallback_agent.process_command(user_command=resolved_command, user_context=user_context)
                 
                 final_response_text = self.answering_agent.process_response(agent_response)
                 return final_response_text
@@ -225,15 +237,15 @@ class TodowaApp:
             all_agent_responses, all_actions_to_execute = [], []
             
             agent_map = {
-                "TaskAgent": self.task_agent,
-                "JournalAgent": self.journal_agent,
+                "TaskAgent": task_agent,
+                "JournalAgent": journal_agent,
                 "BrainAgent": self.brain_agent,
-                "ScheduleAgent": self.schedule_agent,
-                "FindingAgent": self.finding_agent,
-                "GeneralFallback": self.fallback_agent,
+                "ScheduleAgent": schedule_agent,
+                "FindingAgent": finding_agent,
+                "GeneralFallback": fallback_agent,
             }
 
-            user_context = await self._build_user_context(user_id)
+            user_context = await self._build_user_context(user_id, user_supabase_client)
 
             for task in sub_tasks:
                 clarified_command = task.get('clarified_command')
@@ -266,12 +278,12 @@ class TodowaApp:
                 'execution_result': execution_result,
                 'user_context': user_context,
             }
-            final_response_text = self.answering_agent.process_multi_response(final_response_context)
+            final_response_text = answering_agent.process_multi_response(final_response_context)
             return final_response_text
 
         except Exception as e:
             logger.error(f"❌ An unexpected error occurred for user '{user_id}': {e}", exc_info=True)
-            final_response_text = self.answering_agent.process_error("I ran into an unexpected problem.")
+            final_response_text = answering_agent.process_error("I ran into an unexpected problem.")
             return final_response_text
         finally:
             history_manager.add_interaction(
@@ -280,15 +292,15 @@ class TodowaApp:
                 response=final_response_text
             )
 
-    async def _build_user_context(self, user_id: str) -> Dict[str, Any]:
+    async def _build_user_context(self, user_id: str, user_supabase_client: Client) -> Dict[str, Any]:
         context = {
             'user_info': {'timezone': 'GMT+7', 'user_id': user_id},
             'ai_brain': []
         }
-        if not self.supabase:
+        if not user_supabase_client:
             return context
         try:
-            brain_result = await self.supabase.table('ai_brain_memories').select('*').eq('user_id', user_id).limit(10).execute()
+            brain_result = await user_supabase_client.table('ai_brain_memories').select('*').eq('user_id', user_id).limit(10).execute()
             if brain_result.data:
                 context['ai_brain'] = brain_result.data
         except Exception as e:
@@ -343,7 +355,17 @@ def webhook():
             services.send_fonnte_message(sender_phone, limit_message)
             return jsonify({"status": "limit_exceeded"}), 429
 
-        response_text = asyncio.run(chat_app.process_message_async(message_text, user_id))
+        # Create a user-specific Supabase client that will enforce RLS
+        user_supabase_client = chat_app.create_user_supabase_client(user_id)
+        if not user_supabase_client:
+            # If client creation fails, it's a server-side issue.
+            logger.error(f"Failed to create a dedicated client for user {user_id}.")
+            error_reply = "I'm having trouble with your session right now. Please try again in a moment."
+            services.send_fonnte_message(sender_phone, error_reply)
+            return jsonify({"status": "error", "message": "User client creation failed"}), 500
+
+        # Process the message using the RLS-enabled client
+        response_text = asyncio.run(chat_app.process_message_async(message_text, user_id, user_supabase_client))
         services.send_fonnte_message(sender_phone, response_text)
         return jsonify({"status": "success"}), 200
 
