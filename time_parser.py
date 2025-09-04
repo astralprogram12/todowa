@@ -1,19 +1,40 @@
 """
-Dummy time_parser module for backward compatibility.
+Deprecated Time Parser Module.
 
-This module has been removed and its functionality has been
-moved directly into the task management agent.
+This module is kept for backward compatibility purposes only. The functionality
+for parsing time expressions from user input has been integrated directly into
+the `TaskManagementAgent` and other relevant agents that handle time-sensitive
+information.
+
+This ensures that time parsing is handled within the context of the specific
+task, leading to more accurate and context-aware interpretations.
 """
 
 class TimeParser:
-    """Dummy TimeParser class for backward compatibility."""
+    """
+    A dummy TimeParser class for backward compatibility.
+
+    This class and its methods are deprecated and should not be used in new
+    implementations.
+    """
     
     def __init__(self, supabase=None, ai_model=None):
-        """Initialize dummy time parser."""
+        """
+        Initializes the dummy time parser. This is a no-op.
+
+        Args:
+            supabase: Ignored.
+            ai_model: Ignored.
+        """
         pass
     
-    def get_parser_statistics(self):
-        """Return empty statistics."""
+    def get_parser_statistics(self) -> dict:
+        """
+        Returns empty statistics, as this parser is no longer in use.
+
+        Returns:
+            A dictionary with zero-value statistics.
+        """
         return {
             'total_calls': 0,
             'overall_success_rate': 0.0,
@@ -22,16 +43,27 @@ class TimeParser:
             'success_count': 0
         }
     
-    async def parse_time_expression(self, text, current_time=None, 
-                                   user_timezone="UTC", language_hint=None):
-        """Dummy method - functionality moved to task management agent."""
+    async def parse_time_expression(self, text: str, current_time=None,
+                                   user_timezone: str = "UTC", language_hint=None) -> dict:
+        """
+        A dummy method indicating that the time parsing functionality is deprecated.
+
+        Args:
+            text: The text to parse.
+            current_time: Ignored.
+            user_timezone: Ignored.
+            language_hint: Ignored.
+
+        Returns:
+            A dictionary indicating that the feature is deprecated.
+        """
         return {
             'has_time_expression': False,
             'confidence': 0.0,
             'time_info': {
                 'parsed_time': None,
                 'type': 'deprecated',
-                'description': 'Time parsing moved to task management agent'
+                'description': 'Time parsing functionality has been moved into the relevant agents.'
             },
             'extracted_task': text,
             'parsing_method': 'deprecated'

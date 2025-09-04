@@ -1,3 +1,23 @@
+"""
+Centralized configuration management for the multi-agent AI assistant.
+
+This module consolidates all application settings, secrets, and credentials,
+loading them from environment variables. This approach enhances security and
+portability, making it easy to configure the application for different
+environments (development, staging, production) without changing the code.
+
+Attributes:
+    FONNTE_TOKEN (Optional[str]): API token for the Fonnte WhatsApp messaging service.
+    SUPABASE_URL (Optional[str]): URL for the Supabase project database.
+    SUPABASE_SERVICE_KEY (Optional[str]): Service key for authenticating with the Supabase backend.
+    UNVERIFIED_LIMIT (int): The lifetime message limit for users who have not registered.
+    VERIFIED_LIMIT (int): The daily message limit for registered and verified users.
+    MAX_AGENT_LOOPS (int): A safety measure to prevent infinite loops in agent interactions.
+    CHAT_TEST_USER_ID (str): A constant UUID for a test user in the database.
+    CHAT_TEST_PHONE (str): A special identifier for the user during chat-based testing.
+    SUPABASE_JWT_SECRET (Optional[str]): The secret key for generating user-specific JWTs for Row Level Security.
+    SUPABASE_ANON_KEY (Optional[str]): The anonymous key for the Supabase project.
+"""
 import os
 from typing import Dict, Optional
 

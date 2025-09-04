@@ -8,6 +8,10 @@ The system is built on a multi-agent architecture, where each agent has a specif
 
 For a detailed visual representation of the workflow, please see the `detailed_flow_diagram.md` file.
 
+## Detailed Documentation
+
+For a comprehensive overview of each module, class, and function, please see the [**Detailed Documentation**](DOCUMENTATION.md).
+
 ### Orchestrator
 
 The main entry point and orchestrator for the application is `wa_version.py`. It is a Flask application that receives user messages from WhatsApp via a webhook. Its key responsibilities include:

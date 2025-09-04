@@ -1,18 +1,19 @@
-#!/usr/bin/env python3
 """
-Answering Agent - Final Response Handler (Direct JSON Injection)
- 
-This agent formats the final user response by directly injecting a JSON
-configuration from the database into the AI prompt. It is now upgraded to
-handle both single and multi-step execution plans.
+Answering Agent: The Final Response Handler.
 
-RESPONSIBILITIES:
-- Process information from other agents.
-- Format final responses for the user.
-- Fetch a mandatory communication style JSON from the database.
-- Inject this JSON directly into the AI prompt as a strict instruction.
-- Apply standardized safety rules to every response.
-- Convert UTC times to the user's timezone for display.
+This agent is the last step in the chain, responsible for synthesizing all
+processed information into a single, user-friendly response. It fetches
+communication style preferences from the database and injects them into a
+prompt for the AI model, ensuring the final output is consistent with the
+user's desired persona. It also handles timezone conversions and applies
+standard safety guidelines to every response.
+
+Key Responsibilities:
+- Consolidate outputs from single or multiple specialist agents.
+- Fetch and apply user-specific communication styles from the database.
+- Convert UTC timestamps to the user's local timezone.
+- Generate a final, coherent, and safe response for the user.
+- Format error messages and clarification requests.
 """
 
 import logging
@@ -24,20 +25,48 @@ from datetime import datetime, timezone, timedelta
 logger = logging.getLogger(__name__)
 
 class AnsweringAgent:
-    """Handles all final responses by directly applying a database-defined JSON style."""
+    """
+    Handles all final user responses by applying a database-defined persona.
+
+    This agent takes the structured output from other agents, combines it with
+    a communication style fetched from the database, and uses an AI model to
+    generate a polished, user-facing message.
+
+    Attributes:
+        ai_model: The generative AI model instance for creating responses.
+        supabase: The Supabase client for database interactions.
+        default_timezone_offset (int): The default timezone offset to use if
+                                       the user's timezone is not available.
+    """
     
     def __init__(self, ai_model, supabase=None):
+        """
+        Initializes the AnsweringAgent.
+
+        Args:
+            ai_model: An instance of a generative AI model.
+            supabase: An optional Supabase client instance.
+        """
         self.ai_model = ai_model
         self.supabase = supabase
-        self.default_timezone_offset = 7  # GMT+7 (Indonesia/Jakarta)
-        logger.info("🤖 AnsweringAgent initialized (Direct JSON Injection Mode)")
+        self.default_timezone_offset = 7  # GMT+7 (Jakarta)
+        logger.info("🤖 AnsweringAgent initialized")
     
     # --- NEW METHOD: process_multi_response ---
     def process_multi_response(self, context: Dict[str, Any]) -> str:
         """
-        Processes the output from MULTIPLE specialist agents (from a multi-step plan)
-        and synthesizes a single, coherent response for the user. This is the new
-        primary entry point for the Master Planner architecture.
+        Processes output from multiple agents to synthesize a single response.
+
+        This is the primary entry point for handling the results of a multi-step
+        execution plan. It consolidates all agent responses into a single package
+        before generating the final message.
+
+        Args:
+            context: A dictionary containing the results of the execution, including
+                     'agent_responses', 'original_command', and 'user_context'.
+
+        Returns:
+            A single, coherent, user-friendly response string.
         """
         logger.info("📝 AnsweringAgent processing multi-response with direct JSON injection...")
         
@@ -66,8 +95,16 @@ class AnsweringAgent:
     # --- NEW METHOD: process_error ---
     def process_error(self, error_message: str) -> str:
         """
-        Formats a generic, safe error message to be shown to the user.
-        It logs the technical details but only shows a polite message.
+        Formats a generic, safe error message for the user.
+
+        While the detailed error is logged for developers, this method ensures
+        the user sees only a polite, non-technical message.
+
+        Args:
+            error_message: The technical error message to be logged.
+
+        Returns:
+            A safe, user-facing error message.
         """
         logger.error(f"AnsweringAgent is processing a system error: {error_message}")
         # This can be a static message or could use the AI for a more natural tone.
@@ -76,8 +113,18 @@ class AnsweringAgent:
 
     def process_response(self, information: Dict[str, Any]) -> str:
         """
-        Processes information from a single agent (or a consolidated package) 
-        and generates the final user response.
+        Processes information and generates the final user response.
+
+        This method takes a package of information, fetches user preferences,
+        builds a detailed prompt, and calls the AI model to generate the
+        final, formatted response.
+
+        Args:
+            information: A dictionary containing the context and data to be
+                         synthesized into a response.
+
+        Returns:
+            The final, formatted response string for the user.
         """
         try:
             logger.info("📝 AnsweringAgent processing information with direct JSON injection...")
@@ -112,19 +159,29 @@ class AnsweringAgent:
             return f"I apologize, there was an error processing your request. Here's a summary: {fallback_message}"
 
     def process_context_clarification(self, clarification_request: str) -> str:
-        """Formats a clarification request to the user."""
-        try:
-            # Using a simple, reliable f-string for this is often better than an AI call.
-            return f"Maaf, saya kurang mengerti. Bisakah Anda memperjelas maksud Anda tentang '{clarification_request}'? 🤔"
-        except Exception as e:
-            logger.error(f"❌ Error in clarification: {e}")
-            return f"Maaf, bisakah Anda memberikan informasi lebih jelas? {clarification_request}"
+        """
+        Formats a clarification question to send back to the user.
+
+        Args:
+            clarification_request: The specific point that needs clarification.
+
+        Returns:
+            A formatted string asking the user for more information.
+        """
+        return f"I need a bit more information. Could you please clarify what you mean by '{clarification_request}'? 🤔"
 
     # --- PRIVATE HELPER METHODS (Unchanged) ---
 
     def _convert_utc_to_user_timezone(self, text_content: str, user_timezone_info: dict) -> str:
         """
-        Convert UTC timestamps in text content to user's timezone for display.
+        Converts UTC timestamps in a string to the user's local timezone.
+
+        Args:
+            text_content: A string that may contain UTC timestamps.
+            user_timezone_info: A dictionary with the user's timezone details.
+
+        Returns:
+            The text content with UTC times converted to the user's timezone.
         """
         timezone_str = user_timezone_info.get('timezone', 'GMT+7')
         timezone_name = user_timezone_info.get('name', timezone_str)
@@ -153,8 +210,13 @@ class AnsweringAgent:
 
     def _get_communication_preferences(self, user_id: str) -> Dict[str, str]:
         """
-        Fetches a mandatory communication style JSON from the database and formats it
-        for direct injection into the AI prompt.
+        Fetches communication style preferences from the database.
+
+        Args:
+            user_id: The UUID of the user.
+
+        Returns:
+            A dictionary containing the response style and safety guidelines.
         """
         try:
             if not self.supabase:
@@ -189,9 +251,9 @@ class AnsweringAgent:
     def _get_standard_safety_guidelines(self) -> str:
         """Returns the standardized safety guidelines for all AI prompts."""
         return (
-            "Strictly avoid generating any content that is illegal, harmful, racist, sexist, unethical, or promotes hate speech. "
-            "Maintain a respectful, professional, and safe tone at all times. "
-            "Never show raw JSON, internal system details, debugging information, or your thinking process."
+            "Strictly avoid illegal, harmful, unethical, racist, or sexist content. "
+            "Maintain a respectful and professional tone. Never show raw JSON, "
+            "internal system details, or your thinking process."
         )
 
     def _get_emergency_fallback_preferences(self) -> Dict[str, str]:
