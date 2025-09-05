@@ -1,3 +1,29 @@
+# IDE and editor specific files
+.idea/
+.vscode/
+*.swp
+*~
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# Dependency directories
+node_modules/
+venv/
+env/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Log files
+*.log
+
+# Local config files
+*.local
+
+# Other
 api_key_status.json
-*.json
 *.json
